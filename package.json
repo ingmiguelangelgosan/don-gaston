@@ -1,0 +1,26 @@
+{
+  "name": "don-gaston",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24.19.0 <25"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node --env-file-if-exists=.env dist/app/main.js",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src tests --max-warnings=0",
+    "format": "prettier --write src tests package.json tsconfig*.json eslint.config.js .prettierrc.json .github/workflows/local-checks.yml",
+    "format:check": "prettier --check src tests package.json tsconfig*.json eslint.config.js .prettierrc.json .github/workflows/local-checks.yml",
+    "test": "node --test tests/*.test.ts",
+    "check": "npm run format:check && npm run lint && npm run typecheck && npm test && npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "eslint": "10.14.0",
+    "prettier": "3.9.10",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.72.1"
+  }
+}

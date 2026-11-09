@@ -1,0 +1,17 @@
+# Solo se cargará si Codex confía en este repositorio.
+# La disponibilidad real de subagentes depende del runtime y los permisos de sesión.
+[agents]
+enabled = true
+max_concurrent_threads_per_session = 3
+
+[agents.finance_domain]
+description = "Especialista en reglas financieras, no doble conteo, dinero exacto y trazabilidad."
+config_file = "./agents/finance_domain.toml"
+
+[agents.security_reviewer]
+description = "Revisor de privacidad, identidad, idempotencia, permisos y aislamiento; no ejecuta cambios."
+config_file = "./agents/security_reviewer.toml"
+
+[agents.test_engineer]
+description = "Diseña y revisa pruebas deterministas, reintentos, concurrencia y contratos."
+config_file = "./agents/test_engineer.toml"
