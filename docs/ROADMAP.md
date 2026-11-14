@@ -12,6 +12,14 @@
 
 ## Fase 1 — Dominio puro y libro de movimientos simulado
 
+**Avance 2026-11-08:** gastos/categorías implementados en memoria y SQLite local
+tras aprobación de ADR-001 para datos sintéticos. Ver [primer incremento](reviews/PHASE1_EXPENSE_INCREMENT.md)
+y [persistencia SQLite](reviews/PHASE1_SQLITE_INCREMENT.md): migración, exactitud,
+idempotencia durable, procesos concurrentes y respaldo/restauración aislados verificados.
+La Fase 1 completa permanece abierta; correcciones auditables, otras proyecciones y
+controles de operación real siguen pendientes. La prueba de backup sintético no
+completa Fase 3 ni habilita el piloto.
+
 - Value objects monetarios; moneda ISO; validación de cantidades; identificadores estables; eventos de caja vs consumo.
 - Categorías y transacción simple con prueba de no duplicación de reintentos.
 - Diseño del ledger y migraciones para DB aislada *solo después de ADR*.

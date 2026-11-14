@@ -9,6 +9,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "start": "node --env-file-if-exists=.env dist/app/main.js",
+    "example:expense": "node src/app/expense-example.ts",
+    "example:sqlite": "node src/app/sqlite-expense-example.ts write && node src/app/sqlite-expense-example.ts read",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src tests --max-warnings=0",
     "format": "prettier --write src tests package.json tsconfig*.json eslint.config.js .prettierrc.json .github/workflows/local-checks.yml",

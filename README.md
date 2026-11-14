@@ -1,8 +1,8 @@
 ﻿# Don Gastón — agente financiero independiente
 
-**Estado: Fase 0 local implementada y verificada el 2026-11-08.** Solo bootstrap y ejemplos sintéticos. Fase 1 pendiente. No existe DB, API ni conexión con Sir Jarvis. El workspace recibido era un kit documental y no está inicializado como repositorio Git; no se crearon commits ni PR.
+**Estado: incremento SQLite de Fase 1 implementado y verificado localmente el 2026-11-08.** Categorías, gastos simples y totales mensuales con persistencia SQLite aislada e idempotencia durable, exclusivamente con datos sintéticos. Se conserva el adaptador en memoria. La Fase 1 completa sigue abierta; no existe API ni conexión con Sir Jarvis. Sin commits ni PR en este incremento.
 
-Don Gastón será propietario de las reglas financieras; Sir Jarvis conserva canales, identidad conversacional, orquestación y confirmaciones. Las reglas de producto siguen siendo requisitos, no funcionalidades construidas. La referencia histórica se conserva sin cambios.
+Don Gastón es propietario de las reglas financieras; Sir Jarvis conserva canales, identidad conversacional, orquestación y confirmaciones. Solo el alcance descrito aquí está implementado; las demás reglas de producto siguen siendo requisitos. La referencia histórica se conserva sin cambios.
 
 ## Ejecutar localmente
 
@@ -11,6 +11,8 @@ Entorno probado: Windows/PowerShell, Node **24.19.0**, npm **11.17.0**. Se admit
 ```powershell
 npm.cmd ci --ignore-scripts
 npm.cmd run check
+npm.cmd run example:expense
+npm.cmd run example:sqlite
 npm.cmd start
 ```
 
@@ -20,25 +22,127 @@ En otras shells puede usarse `npm` en lugar de `npm.cmd`. La instalación descar
 
 Configuración admitida: `NODE_ENV=development|test`, `APP_MODE=local`, `DATA_MODE=synthetic`, `CURRENCY_DEFAULT=COP`, `AI_ENABLED=false`, `JARVIS_INTEGRATION_ENABLED=false`. Variables ausentes usan defaults; valores vacíos o distintos fallan. Las variables de DB, bucket y token Jarvis heredadas del kit se rechazan incluso vacías. Otras variables del sistema se ignoran, no se registran ni habilitan capacidades.
 
+## Primer incremento: «Gasté $45.000 COP en gasolina»
+
+`npm.cmd run example:expense` ejecuta una composición sintética aislada: crea la categoría
+Gasolina, registra un gasto el `2026-11-08`, reintenta la misma intención y consulta
+su resultado y total mensual. Produce `sameFactOnRetry: true` y un total de
+`{"minor":"4500000","currency":"COP"}`. Cada ejecución comienza con memoria vacía.
+`npm start` conserva el bootstrap de Fase 0; no abre un servidor ni ejecuta ese ejemplo.
+
+- **Dinero exacto:** `Money` utiliza `bigint` en centavos de COP; entrada canónica
+  `"45000.00"`, sin separadores de miles. Rechaza negativos, formatos ambiguos y más
+  de dos decimales; no redondea. Los gastos requieren importe positivo. Solo COP
+  está implementada, sin cambio de divisas. JSON representa unidades menores como texto.
+- **Categorías y gastos:** IDs estables, nombre explícito, categoría existente y fecha
+  civil válida `YYYY-MM-DD`; sin inferencia de fecha, clasificación automática o parser de lenguaje natural.
+  Registros inmutables; edición, borrado, subcategorías y correcciones quedan pendientes.
+- **Idempotencia:** clave estable por instancia/sujeto, huella SHA-256 de operación y
+  campos normalizados, resultado original en reintentos y conflicto si cambia el contenido.
+  Ante respuesta incierta se consulta `findIntent` con la misma clave. Otra clave representa
+  otra intención, aunque el gasto sea igual; no hay deduplicación por importe/fecha.
+- **Consulta:** `monthlyTotals` agrega consumo por mes y categoría, con filtro opcional.
+  Un gasto es un solo hecho; no se suman caja y consumo. No se implementó una proyección de caja.
+- **Límites:** contexto de actor/sujeto/instancia separado del payload, política inyectada
+  y revalidada para cada acción, incluido reintento y lectura. La política del ejemplo
+  es ficticia; no autentica usuarios reales. El adaptador de memoria es interno y debe
+  usarse a través del servicio. No ofrece durabilidad ni atomicidad entre procesos.
+
+[Informe del incremento, decisiones y evidencia](docs/reviews/PHASE1_EXPENSE_INCREMENT.md).
+
+## Incremento SQLite: escribir, terminar el proceso y recuperar
+
+[ADR-001 aprobado](docs/adr/001-persistence.md) el 2026-11-08 para una instancia
+personal con datos sintéticos. Driver `node:sqlite` incorporado en Node 24.19.0;
+motor observado SQLite 3.53.3. No se instalaron dependencias. La API síncrona mantiene
+el puerto existente; el módulo tiene estabilidad *release candidate* en esta versión.
+[Documentación de Node 24.19.0](https://nodejs.org/download/release/v24.19.0/docs/api/sqlite.html).
+
+```powershell
+npm.cmd run example:sqlite
+# Equivale a dos procesos separados:
+node src/app/sqlite-expense-example.ts write
+node src/app/sqlite-expense-example.ts read
+# Pruebas de persistencia, concurrencia y respaldo:
+node --test tests/sqlite-store.test.ts
+```
+
+El ejemplo usa exclusivamente `.cache/sqlite-example/synthetic.sqlite`, con fixture
+fija de gasolina. Ambos procesos muestran el mismo movimiento y `4500000` centavos.
+Reejecutarlo conserva IDs y total por las mismas claves. El modo `read` abre solo
+lectura. Las pruebas generan bases aisladas en `.cache/sqlite-tests/store-*`; se
+conservan, sin limpieza automática. `.cache/` y archivos SQLite están ignorados por Git.
+El ejemplo no toma rutas ni credenciales de `.env`; `npm start` conserva el bootstrap.
+
+`SqliteExpenseStore` aplica migración versionada al crear una base vacía; rechaza
+bases ajenas, versiones desconocidas o esquema alterado. Comprueba checksum, SQL
+del esquema, integridad, claves foráneas, huellas y correspondencia del resultado.
+`facts` conserva categorías/gastos y `intents` su respuesta original; las relaciones
+circulares diferidas impiden hechos sin intención. `BEGIN IMMEDIATE` hace commit
+conjunto, con rollback ante fallo. `journal_mode=DELETE`, `synchronous=FULL` y claves
+foráneas activas; triggers impiden actualización/borrado financiero.
+
+Los importes permanecen como `TEXT` canónico; no hay sumas SQL ni conversión monetaria
+a `number`. `Money`, `ExpenseService` y el adaptador en memoria no se modificaron.
+`backupTo(destinoNuevo)` y `SqliteExpenseStore.restoreBackup(origen, destinoNuevo)`
+usan `VACUUM INTO` y verifican el snapshot; nunca sobrescriben un destino existente.
+La restauración abre el origen solo lectura. Si falla, el archivo parcial se conserva
+y no se declara válido. No hay restauración ni copia de información real.
+
+| Límite operativo | Comportamiento |
+|---|---|
+| Importe: 4096 dígitos de centavos; resultado: 32768 bytes | Exceso → `STORAGE_LIMIT`, sin truncar ni consumir intención |
+| Archivo principal: 64 MiB | Límite al abrir y `max_page_count`; journal/copias/temporales requieren espacio adicional |
+| Consulta: 10000 gastos por ámbito | Exceso → `STORAGE_LIMIT`; el puerto actual lista antes de filtrar por mes |
+| Bloqueo: 1000 ms por defecto, configurable 0–5000 ms | `STORAGE_BUSY`; consultar misma intención y reintentar conservando clave |
+| Corrupción / esquema incompatible | `STORAGE_CORRUPT` / `STORAGE_SCHEMA`, sin reparar ni regenerar hechos |
+
+Otros errores explícitos: `STORAGE_IO`, `STORAGE_CLOSED`, `STORAGE_READ_ONLY` y
+`STORAGE_DESTINATION_EXISTS`. Los errores no incluyen SQL, rutas o valores financieros.
+La ruta de composición debe ser confiable y local; el adaptador no es una frontera
+para recibir rutas de usuarios. Archivos nuevos usan modo `0600` donde el SO lo
+aplica; ACL Windows, cifrado y protección ante administración privilegiada no están
+certificados. La política de identidad sigue siendo una fixture, sin autenticación real.
+
+[Informe SQLite, pruebas y limitaciones](docs/reviews/PHASE1_SQLITE_INCREMENT.md).
+
 ## Estructura implementada y responsables
 
 | Ruta | Contenido / propietario |
 |---|---|
 | `src/app/config.ts`, `src/app/main.ts` | Validación y composición local / coordinador |
+| `src/domain/`, `src/application/`, `src/infrastructure/in-memory-expense-store.ts`, `src/app/expense-example.ts` | Dinero, gastos, servicio, puertos y simulador / coordinador |
+| `tests/money.test.ts`, `tests/expenses.test.ts`, `tests/fixtures/expense-context.ts` | Pruebas del primer incremento / test_engineer |
+| `src/infrastructure/sqlite-expense-store.ts`, `sqlite-errors.ts`, `migrations/001-expenses.ts`, `src/app/sqlite-expense-example.ts` | Persistencia, migración y ejemplo / coordinador |
+| `tests/sqlite-store.test.ts`, `tests/fixtures/sqlite-worker.ts` | Pruebas SQLite y procesos independientes / test_engineer |
 | `tests/*.test.ts`, `tests/fixtures/` | Configuración, proceso y ejemplo financiero sintético / coordinador |
 | `package.json`, `package-lock.json`, `tsconfig*.json` | Scripts, versiones exactas y TypeScript estricto / coordinador |
 | `eslint.config.js`, `.prettierrc.json`, `.npmrc`, `.env.example`, `.gitignore` | Herramientas y configuración segura / coordinador |
 | `.github/workflows/local-checks.yml` | CI preparado, sin despliegue / coordinador |
-| `docs/adr/` | Persistencia y contrato pendientes / coordinador |
+| `docs/adr/` | SQLite aprobado; contrato Jarvis pendiente / coordinador |
 | `docs/reviews/FINANCE_DOMAIN_REVIEW.md` | Invariantes y trazabilidad / finance_domain |
 | `docs/reviews/TEST_MATRIX.md` | Matriz sintética y casos futuros / test_engineer |
 | `docs/reviews/SECURITY_REVIEW.md` | Informe del revisor de solo lectura, documentado por coordinador |
 
-Los tres especialistas se ejecutaron en paralelo, sin propiedad compartida de archivos. El rol de seguridad declara sandbox de solo lectura; su aplicación efectiva por el runtime no fue verificada. No se modificó la configuración de agentes.
+En Fase 1 se delegaron revisión de dominio, pruebas y revisión de seguridad, sin propiedad compartida de archivos. El rol de seguridad declara sandbox de solo lectura y no realizó escrituras; su aplicación efectiva por el runtime no fue verificada. No se modificó la configuración de agentes.
 
-No se crearon carpetas vacías para capas futuras. Dominio, aplicación, infraestructura e interfaces se incorporarán cuando tengan comportamiento aprobado.
+No se crearon carpetas vacías para capas futuras. Las interfaces de red siguen pendientes.
 
 ## Evidencia ejecutada
+
+Incremento SQLite, 2026-11-08: `npm.cmd run check` terminó con código 0: formato,
+lint, typecheck, **46/46 pruebas aprobadas** (26 previas + 20 SQLite) y build.
+`npm.cmd run example:sqlite` terminó con código 0: dos procesos recuperaron el mismo
+ID, importe y total. Prueba de respaldo/restauración: snapshot en archivo separado,
+un evento posterior excluido, intervalo observado de 2.508 ms y recuperación completa
+en 5.546 ms en esta ejecución local. Son mediciones sintéticas, no objetivos de servicio.
+
+Primer incremento de Fase 1, 2026-11-08: `npm.cmd run check` terminó con código 0
+(formato, lint, typecheck, **26 tests aprobados**, build); `npm.cmd run example:expense`
+terminó con código 0 y total exacto `4500000` centavos, sin duplicación al reintentar.
+Son 22 tests nuevos más los 4 existentes. No se instalaron ni actualizaron dependencias.
+
+La siguiente evidencia corresponde al bootstrap anterior de Fase 0:
 
 Scripts revisados antes de ejecución. Todos los comandos siguientes terminaron con código 0:
 
@@ -64,11 +168,11 @@ Versiones consultadas en npm antes de fijarlas: TypeScript 6.0.3, ESLint 10.14.0
 
 ## Pendientes y siguiente fase
 
-- [ADR-001](docs/adr/001-persistence.md): comparar almacenamiento aislado, transacciones y recuperación antes de elegir DB/migraciones.
+- [ADR-001](docs/adr/001-persistence.md) aprobado e implementado para categorías/gastos sintéticos. Antes de un piloto faltan objetivos operativos de respaldo/retención, permisos y recuperación ante fallos físicos.
 - [ADR-002](docs/adr/002-jarvis-contract.md): cotejo contractual y aprobación futura; el borrador no garantiza compatibilidad.
 - Decidir redondeo/residuos, proyección presupuestaria y calendario antes de los módulos correspondientes. Precisiones de la referencia histórica están documentadas en el informe de dominio, sin resolverlas por suposición.
-- Fase 1 requiere un incremento separado y autorizado: dominio puro y libro simulado, con pruebas propias. No se inicia automáticamente.
-- Idempotencia durable, autorización, recibos privados, respaldo/restauración, datos reales y despliegue siguen pendientes. Los tests de Fase 0 no certifican esos controles.
+- Fase 1 tiene gastos en memoria y SQLite implementados; su cierre completo sigue pendiente. Un siguiente incremento acotado puede abordar correcciones auditables por compensación y su efecto en consultas, manteniendo fixtures.
+- Autenticación/autorización operativa, recibos privados, respaldo/restauración de información real, datos reales y despliegue siguen pendientes. La idempotencia y recuperación verificadas aquí son locales con fixtures; no certifican producción.
 - CI usa tags de acciones y la línea Node 24: posible deriva de versiones; no fue ejecutado remotamente. `.gitignore` no es un control de acceso ni garantiza ausencia de secretos.
 
 ## Fuentes de verdad
