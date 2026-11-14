@@ -7,6 +7,26 @@ No autoriza datos reales, despliegues, infraestructura o conexiones externas.
 Responsable: coordinador, con revisión de dominio/seguridad y pruebas independientes.
 La Fase 1 completa permanece abierta.
 
+Actualización 2026-11-14: correcciones auditables aprobadas por el usuario. La migración
+`002-expense-corrections.ts` añade eventos append-only y amplía `intents` para aceptar
+anulación sin gasto nuevo o reemplazo atómico. La migración 001 permanece intacta.
+Los registros de `facts` y las columnas históricas de `intents` se preservan exactamente;
+la copia de la tabla de intenciones es una operación de esquema, no una corrección de
+datos financieros. Las huellas `category:v1` y `expense:v1` no cambian.
+
+La migración verifica v1 antes de actuar, reconstruye la tabla dentro de una transacción,
+verifica esquema, datos y claves foráneas antes del commit y restablece su enforcement
+al salir. En caso de fallo se revierte todo. Se sigue el procedimiento de reconstrucción
+de tabla de [SQLite](https://www.sqlite.org/lang_altertable.html#making_other_kinds_of_table_schema_changes).
+Abrir con escritura migra v1 a v2; abrir solo lectura permite consultar v1 sin cambiarla.
+No se ofrece downgrade a v1 y el binario anterior no puede abrir una base v2.
+
+Las claves de corrección comparten namespace de intención por instancia/sujeto. Una
+restricción única impide dos correcciones del mismo gasto; FK y triggers vinculan
+evento, reemplazo opcional e intención. Una intención de anulación nunca admite un
+gasto oculto asociado. Consultas de totales consideran solo gastos vigentes; historial
+y replay conservan los originales. [Evidencia del incremento](../reviews/PHASE1_EXPENSE_CORRECTIONS.md).
+
 Se compararon SQLite aislado y PostgreSQL/Supabase antes de crear adaptadores o migraciones.
 Criterios: unicidad transaccional de intención y huella, concurrencia, auditoría,
 aislamiento, costo, respaldo y restauración demostrada con fixtures (RPO/RTO).

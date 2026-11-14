@@ -1,4 +1,5 @@
 import type { Category, Expense } from '../domain/expenses.ts';
+import type { ExpenseCorrection } from '../domain/expense-corrections.ts';
 
 /** Supplied by a trusted boundary, never taken from the financial payload. */
 export interface AccessContext {
@@ -6,7 +7,8 @@ export interface AccessContext {
   readonly subjectRef: string;
   readonly instanceRef: string;
 }
-export type Action = 'category:create' | 'expense:record' | 'expense:read';
+export type Action =
+  'category:create' | 'expense:record' | 'expense:read' | 'expense:correct';
 export interface AccessPolicy {
   allows(context: AccessContext, action: Action): boolean;
 }
@@ -14,7 +16,7 @@ export interface Scope {
   readonly subjectRef: string;
   readonly instanceRef: string;
 }
-export type IntentResult = Category | Expense;
+export type IntentResult = Category | Expense | ExpenseCorrection;
 
 /**
  * Implementations must atomically commit intent fingerprint + immutable fact.
@@ -37,5 +39,6 @@ export interface ExpenseStore {
   ): Expense;
   findIntent(scope: Scope, key: string): IntentResult | undefined;
   getCategory(scope: Scope, id: string): Category | undefined;
+  /** Current expenses only. Historical originals are retained by correction-capable stores. */
   listExpenses(scope: Scope): readonly Expense[];
 }

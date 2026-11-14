@@ -16,9 +16,15 @@
 tras aprobación de ADR-001 para datos sintéticos. Ver [primer incremento](reviews/PHASE1_EXPENSE_INCREMENT.md)
 y [persistencia SQLite](reviews/PHASE1_SQLITE_INCREMENT.md): migración, exactitud,
 idempotencia durable, procesos concurrentes y respaldo/restauración aislados verificados.
-La Fase 1 completa permanece abierta; correcciones auditables, otras proyecciones y
-controles de operación real siguen pendientes. La prueba de backup sintético no
+La Fase 1 completa permanece abierta; otras proyecciones y controles de operación
+real siguen pendientes. La prueba de backup sintético no
 completa Fase 3 ni habilita el piloto.
+
+**Avance 2026-11-14:** correcciones de gastos por anulación/reemplazo implementadas
+en SQLite, con migración v1→v2, auditoría permanente y totales vigentes. Se verificaron
+idempotencia, conflictos concurrentes, rollback, recuperación y vínculos restaurados.
+Ver [alcance, pruebas y pendientes](reviews/PHASE1_EXPENSE_CORRECTIONS.md).
+No se inició Fase 2 ni integración externa; la Fase 1 no se declara terminada.
 
 - Value objects monetarios; moneda ISO; validación de cantidades; identificadores estables; eventos de caja vs consumo.
 - Categorías y transacción simple con prueba de no duplicación de reintentos.

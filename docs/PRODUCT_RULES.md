@@ -1,6 +1,6 @@
 # Don Gastón — reglas de negocio (v0.1, trasladadas a agente independiente)
 
-**Estado:** requisitos de producto para implementar; **nada de esto está implementado por el kit documental**. Base: acuerdos registrados el 2026-11-01 en `REFERENCIA_FUNCIONAL_JARVIS_2026-11-01.md`, conservada íntegra. Don Gastón recibe intenciones estructuradas y responde resultados a Jarvis; no opera Telegram ni se apropia del canal. Si hay discrepancia con la referencia, documentar y pedir autorización.
+**Estado:** especificación funcional; el avance implementado se documenta en los informes de Fase 1, exclusivamente con datos sintéticos. Base: acuerdos registrados el 2026-11-01 en `REFERENCIA_FUNCIONAL_JARVIS_2026-11-01.md`, conservada íntegra. Don Gastón recibe intenciones estructuradas; su futura respuesta a Jarvis sigue sujeta al contrato pendiente. No opera Telegram ni se apropia del canal. Si hay discrepancia con la referencia, documentar y pedir autorización.
 
 ## 1. Perfil y experiencia
 
@@ -15,6 +15,44 @@
 - Aprender reglas de clasificación mediante correcciones auditadas; si baja confianza, preguntar.
 - No confundir ingreso ganado con dinero prestado/reembolsos. Registrar ingresos variables y gastos individuales.
 - Una salida por pago de deuda; mostrar vistas distintas de consumo y flujo de caja, sin duplicación de movimientos.
+
+### 2.1 Correcciones auditables de gastos — decisión aprobada 2026-11-14
+
+Ampliación explícita aprobada por el usuario después del incremento SQLite. Concreta
+la regla transversal append-only sin modificar la referencia histórica del 2026-11-01.
+
+- Anular exige intención explícita, gasto existente vigente y motivo. El gasto
+  original permanece consultable y deja de contribuir al consumo vigente. No es
+  un reembolso, movimiento de caja ni gasto ordinario negativo.
+- Corregir importe, categoría o fecha crea una anulación y un nuevo gasto, en una
+  sola operación atómica. Se comunica un reemplazo completo: importe positivo,
+  moneda explícita COP, categoría existente y fecha civil. Los campos no corregidos
+  se repiten de forma explícita; no se infieren de un mensaje ambiguo.
+- El evento conserva ID, gasto original, reemplazo opcional, motivo, actor autorizado
+  y fecha/hora UTC de registro. Actor y reloj vienen de la aplicación, fuera del
+  payload financiero. El motivo se normaliza con trim, tiene 1–500 caracteres y
+  no admite controles internos; timestamp UTC canónico con milisegundos.
+- El total mensual por categoría es una vista **vigente**: excluye originales
+  anulados y cuenta solo reemplazos vigentes. Si cambia la fecha, se retira el importe
+  del mes original y se incorpora al mes de la fecha nueva. Si solo cambia importe
+  o categoría, el efecto sigue en el periodo financiero indicado, aunque la corrección
+  se registre después. La evidencia temporal del cambio permanece en el evento.
+- Cada gasto admite como máximo una corrección aplicada por instancia/sujeto. Dos
+  intenciones incompatibles compiten por ese gasto: una se aplica y la otra obtiene
+  conflicto. Es posible corregir el reemplazo vigente, formando una cadena auditable;
+  no se reactiva el original ni se vuelve a corregir un gasto ya retirado.
+- La clave de intención comparte ámbito con altas de gastos y categorías. Igual clave
+  y contenido canónico devuelve la corrección original; contenido diferente genera
+  conflicto. El replay conserva IDs, actor y timestamp anteriores, incluso si el
+  original ya fue corregido. Reintentar el alta original tampoco lo reactiva.
+- Permiso explícito `expense:correct` para anular/reemplazar y `expense:read` para
+  historial y consulta por intención. Revalidación antes de replay y aislamiento por
+  instancia/sujeto; un gasto ajeno responde como inexistente.
+- Historial consultable en ambas direcciones: gasto reemplazado, nuevo gasto, motivo,
+  actor e instante. No se modifica ni elimina gasto, intención o corrección financiera.
+  Consultar «lo que se veía en una fecha pasada» no forma parte de este incremento.
+
+Implementación y evidencia: [correcciones de Fase 1](reviews/PHASE1_EXPENSE_CORRECTIONS.md).
 
 ## 3. Presupuesto mensual
 
@@ -89,7 +127,7 @@
 ## 14. Fuera de alcance y cuestiones abiertas
 
 - Sin importación masiva Excel, banca abierta, pagos/transferencias, manejo automático de apuestas, app móvil, WhatsApp, sincronización bancaria ni múltiples sujetos por instancia en MVP.
-- Pendiente: licencia; DB; hosting; cifrado/rotación; formato definitivo de protocolo; proveedor IA; condiciones de protección y retención; política de copias y restauración; aprobación de escrituras reales.
+- SQLite local aislado aprobado en ADR-001 exclusivamente para datos sintéticos. Pendiente: licencia; hosting; cifrado/rotación; formato definitivo de protocolo; proveedor IA; condiciones de protección y retención; política operativa de copias y restauración; aprobación de escrituras reales.
 
 ## Reglas transversales de seguridad financiera
 

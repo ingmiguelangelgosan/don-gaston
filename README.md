@@ -1,6 +1,6 @@
 ﻿# Don Gastón — agente financiero independiente
 
-**Estado: incremento SQLite de Fase 1 implementado y verificado localmente el 2026-11-08.** Categorías, gastos simples y totales mensuales con persistencia SQLite aislada e idempotencia durable, exclusivamente con datos sintéticos. Se conserva el adaptador en memoria. La Fase 1 completa sigue abierta; no existe API ni conexión con Sir Jarvis. Sin commits ni PR en este incremento.
+**Estado: correcciones auditables de Fase 1 implementadas y verificadas localmente el 2026-11-14.** Categorías, gastos, anulación/reemplazo y totales vigentes con SQLite aislado e idempotencia durable, exclusivamente con datos sintéticos. Se conserva el adaptador en memoria para el flujo previo. La Fase 1 completa sigue abierta; no existe API ni conexión con Sir Jarvis. Sin commits ni PR en este incremento.
 
 Don Gastón es propietario de las reglas financieras; Sir Jarvis conserva canales, identidad conversacional, orquestación y confirmaciones. Solo el alcance descrito aquí está implementado; las demás reglas de producto siguen siendo requisitos. La referencia histórica se conserva sin cambios.
 
@@ -36,7 +36,8 @@ su resultado y total mensual. Produce `sameFactOnRetry: true` y un total de
   está implementada, sin cambio de divisas. JSON representa unidades menores como texto.
 - **Categorías y gastos:** IDs estables, nombre explícito, categoría existente y fecha
   civil válida `YYYY-MM-DD`; sin inferencia de fecha, clasificación automática o parser de lenguaje natural.
-  Registros inmutables; edición, borrado, subcategorías y correcciones quedan pendientes.
+  Registros inmutables; correcciones por anulación/reemplazo disponibles en SQLite.
+  No se ofrece edición destructiva, borrado ni subcategorías.
 - **Idempotencia:** clave estable por instancia/sujeto, huella SHA-256 de operación y
   campos normalizados, resultado original en reintentos y conflicto si cambia el contenido.
   Ante respuesta incierta se consulta `findIntent` con la misma clave. Otra clave representa
@@ -106,6 +107,40 @@ certificados. La política de identidad sigue siendo una fixture, sin autenticac
 
 [Informe SQLite, pruebas y limitaciones](docs/reviews/PHASE1_SQLITE_INCREMENT.md).
 
+## Correcciones auditables: anular o reemplazar
+
+`ExpenseCorrectionsService` usa el puerto extendido `ExpenseCorrectionStore`, implementado
+por SQLite. Requiere política explícita `expense:correct`; la lectura usa `expense:read`.
+`voidExpense(context, key, { expenseId, reason })` retira el gasto de los totales sin
+borrarlo. `replaceExpense(context, key, { expenseId, reason, replacement })` exige
+reemplazo completo con `amount`, `currency`, `categoryId`, `occurredOn` y lo registra
+atómicamente junto con la anulación y la intención. No se usan gastos negativos.
+
+`getExpenseHistory(context, expenseId)` devuelve el gasto original, estado
+`active|voided|replaced`, el evento `correctedBy` y el vínculo `replaces` cuando el
+gasto proviene de otro reemplazo. El evento incluye motivo, actor, timestamp UTC e
+IDs. Solo el gasto vigente de una cadena contribuye a `monthlyTotals`. Una fecha
+corregida mueve su contribución entre meses, sin borrar la fecha anterior del historial.
+
+Misma clave y contenido devuelve el evento original. Mismo gasto corregido con otra
+clave falla con `EXPENSE_ALREADY_CORRECTED`; misma clave con contenido distinto produce
+`IDEMPOTENCY_CONFLICT`. Gasto inexistente/ajeno: `EXPENSE_NOT_FOUND`. Motivo o reloj
+inválido: `INVALID_CORRECTION`. `findIntent` mantiene las respuestas antiguas y devuelve
+también correcciones nuevas, sin reactivar gastos históricos.
+
+La apertura con escritura migra v1→v2 transaccionalmente; preserva datos y huellas
+anteriores. La apertura solo lectura de v1 no migra. Mantener el binario actualizado
+para bases v2: no hay downgrade. El adaptador en memoria conserva sus funcionalidades
+previas y no implementa el puerto de correcciones.
+
+```powershell
+node --test tests/expense-corrections.test.ts
+npm.cmd run check
+```
+
+Las fixtures se conservan en `.cache/correction-tests/`, con bases nuevas por ejecución.
+No se migran archivos externos ni datos reales. [Informe completo](docs/reviews/PHASE1_EXPENSE_CORRECTIONS.md).
+
 ## Estructura implementada y responsables
 
 | Ruta | Contenido / propietario |
@@ -129,6 +164,12 @@ En Fase 1 se delegaron revisión de dominio, pruebas y revisión de seguridad, s
 No se crearon carpetas vacías para capas futuras. Las interfaces de red siguen pendientes.
 
 ## Evidencia ejecutada
+
+Correcciones, 2026-11-14: `npm.cmd run check`, salida 0: formato, lint, typecheck,
+**64/64 pruebas aprobadas** (46 anteriores + 18 de correcciones) y build. Se probaron
+anulación/reemplazo, periodos y categorías, cadenas, conflictos concurrentes entre
+procesos, fallos transaccionales y de migración, reapertura, respaldo/restauración
+de auditoría y conservación de filas/huellas v1. Evidencia anterior conservada debajo.
 
 Incremento SQLite, 2026-11-08: `npm.cmd run check` terminó con código 0: formato,
 lint, typecheck, **46/46 pruebas aprobadas** (26 previas + 20 SQLite) y build.
@@ -171,7 +212,7 @@ Versiones consultadas en npm antes de fijarlas: TypeScript 6.0.3, ESLint 10.14.0
 - [ADR-001](docs/adr/001-persistence.md) aprobado e implementado para categorías/gastos sintéticos. Antes de un piloto faltan objetivos operativos de respaldo/retención, permisos y recuperación ante fallos físicos.
 - [ADR-002](docs/adr/002-jarvis-contract.md): cotejo contractual y aprobación futura; el borrador no garantiza compatibilidad.
 - Decidir redondeo/residuos, proyección presupuestaria y calendario antes de los módulos correspondientes. Precisiones de la referencia histórica están documentadas en el informe de dominio, sin resolverlas por suposición.
-- Fase 1 tiene gastos en memoria y SQLite implementados; su cierre completo sigue pendiente. Un siguiente incremento acotado puede abordar correcciones auditables por compensación y su efecto en consultas, manteniendo fixtures.
+- Fase 1 tiene gastos y correcciones auditables SQLite implementados; su cierre completo sigue pendiente. Siguiente incremento propuesto: consulta paginada del historial y recorrido de cadenas de corrección, todavía con fixtures y sin ampliar a otros módulos financieros.
 - Autenticación/autorización operativa, recibos privados, respaldo/restauración de información real, datos reales y despliegue siguen pendientes. La idempotencia y recuperación verificadas aquí son locales con fixtures; no certifican producción.
 - CI usa tags de acciones y la línea Node 24: posible deriva de versiones; no fue ejecutado remotamente. `.gitignore` no es un control de acceso ni garantiza ausencia de secretos.
 
