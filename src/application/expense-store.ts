@@ -14,7 +14,9 @@ export type Action =
   | 'expense:read'
   | 'expense:correct'
   | 'budget:write'
-  | 'budget:read';
+  | 'budget:read'
+  | 'event:read'
+  | 'event:ack';
 export interface AccessPolicy {
   allows(context: AccessContext, action: Action): boolean;
 }

@@ -7,6 +7,16 @@ No autoriza datos reales, despliegues, infraestructura o conexiones externas.
 Responsable: coordinador, con revisión de dominio/seguridad y pruebas independientes.
 La Fase 1 completa permanece abierta.
 
+Actualización Fase 1E, 2026-11-14: migración aditiva `004-event-delivery.ts`, con índice
+secuencial, metadatos locales de cursor y reconocimientos append-only. No reconstruye
+ni modifica tablas históricas. El trigger de alerta crea su índice en la transacción
+financiera; reconocer es otra transacción única por ámbito/evento. El runner genera
+una clave local de cursor con `node:crypto` y la confirma junto al esquema. Las copias
+conservan esa clave y los reconocimientos; la protección/rotación operativa sigue
+pendiente. Apertura con escritura migra hasta v4; el puerto de entrega exige v4,
+aunque consultas financieras previas sigan admitiendo solo lectura de v1/v2/v3.
+Sin cambio de driver ni dependencias. [Evidencia](../reviews/PHASE1_EVENT_DELIVERY.md).
+
 Actualización Fase 1D, 2026-11-14: `003-monthly-budgets.ts` incorpora revisiones de
 presupuestos y alertas internas append-only. Amplía el namespace de `intents` con
 `budget_id`, exclusivo de hechos/correcciones, y conserva las columnas históricas

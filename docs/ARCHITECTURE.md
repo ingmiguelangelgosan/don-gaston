@@ -67,10 +67,27 @@ gastos vigentes, sin duplicar hechos ni materializar saldos que puedan desincron
 Cada mutación evalúa los presupuestos afectados antes del mismo commit que confirma
 su intención. Las lecturas de presupuesto, consumo y alertas comparten snapshot.
 
-La migración v3 conserva hechos, intenciones y correcciones anteriores. No hay
-despachador de eventos, scheduler ni outbox de entrega implementados: la futura
-orquestación deberá definir lectura/confirmación de entrega y deduplicación sin
-confundir un evento persistido con una notificación ya enviada.
+Las migraciones conservan hechos, intenciones y correcciones anteriores. Fase 1E
+añade `EventDeliveryService` y `EventDeliveryStore`; `SqliteExpenseStore` delega las
+operaciones a un componente interno sobre la misma conexión. No se crea otro
+servicio ni se duplica el contenido financiero del evento.
+
+La migración v4 añade índice secuencial durable, metadatos locales de cursor y
+reconocimientos append-only. Un trigger indexa nuevas alertas dentro de su transacción
+original. Las consultas usan snapshot y paginación por clave con límite superior;
+los reconocimientos usan `BEGIN IMMEDIATE` y unicidad por instancia/sujeto/evento.
+No hay reservas: varios lectores pueden recibir el mismo evento. La deduplicación
+de efectos en el consumidor es necesaria para una entrega al menos una vez.
+
+El cursor se cifra/autentica con AES-GCM, clave de 32 bytes generada por `node:crypto`
+y persistida localmente. Vincula ámbito, posiciones e IDs de anclaje; no sustituye
+autorización. Base y copias deben recibir la misma protección operativa, pendiente
+para datos reales. No hay rotación de claves ni expiración del cursor implementadas.
+
+El [contrato local v1](EVENT_DELIVERY_CONTRACT_V1.md) minimiza el payload y distingue
+reconocimiento de procesamiento de entrega de notificaciones. No hay despachador,
+API, scheduler ni integración con Jarvis. Su compatibilidad y deduplicación de
+efectos externos siguen pendientes de una decisión y pruebas de integración.
 
 ## Integración con Jarvis: propuesta, no hecho
 

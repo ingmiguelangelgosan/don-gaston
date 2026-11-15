@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { closeSync, existsSync, lstatSync, openSync, statSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -32,6 +32,16 @@ import { Money } from '../domain/money.ts';
 import { migration001 } from './migrations/001-expenses.ts';
 import { migration002 } from './migrations/002-expense-corrections.ts';
 import { migration003 } from './migrations/003-monthly-budgets.ts';
+import { migration004 } from './migrations/004-event-delivery.ts';
+import { SqliteEventDelivery } from './sqlite-event-delivery.ts';
+import type {
+  EventDeliveryStore,
+  PendingEventQuery,
+} from '../application/event-delivery-store.ts';
+import type {
+  EventAcknowledgement,
+  PendingEventPage,
+} from '../domain/event-delivery.ts';
 import type { MonthlyBudgetStore } from '../application/monthly-budget-store.ts';
 import { budgetFingerprint } from '../application/monthly-budget-service.ts';
 import { budgetThreshold } from '../domain/monthly-budgets.ts';
@@ -52,6 +62,7 @@ const APPLICATION_ID = 0x44474153;
 const checksum = createHash('sha256').update(migration001.sql).digest('hex');
 const checksum002 = createHash('sha256').update(migration002.sql).digest('hex');
 const checksum003 = createHash('sha256').update(migration003.sql).digest('hex');
+const checksum004 = createHash('sha256').update(migration004.sql).digest('hex');
 const schemaQuery =
   "SELECT type,name,tbl_name,sql FROM sqlite_schema WHERE name NOT GLOB 'sqlite_*' ORDER BY type,name";
 function expectedSchema(version: number): string {
@@ -61,6 +72,7 @@ function expectedSchema(version: number): string {
     database.exec(migration001.sql);
     if (version >= 2) database.exec(migration002.sql);
     if (version >= 3) database.exec(migration003.sql);
+    if (version >= 4) database.exec(migration004.sql);
     return JSON.stringify(database.prepare(schemaQuery).all());
   } finally {
     database.close();
@@ -71,6 +83,7 @@ const schemas = [
   expectedSchema(1),
   expectedSchema(2),
   expectedSchema(3),
+  expectedSchema(4),
 ];
 const joined = `SELECT f.*, i.fingerprint, i.result_json FROM facts f
   JOIN intents i ON i.instance_ref=f.instance_ref AND i.subject_ref=f.subject_ref
@@ -96,6 +109,8 @@ interface Options {
   readonly afterMigration?: () => void;
   readonly afterBudgetInsert?: () => void;
   readonly afterAlertInsert?: () => void;
+  readonly afterAcknowledgementInsert?: () => void;
+  readonly afterAcknowledgementCommit?: () => void;
 }
 type Row = Record<string, unknown>;
 
@@ -256,7 +271,11 @@ function reserve(path: string): void {
 
 /** Local synthetic adapter. No identity authentication or external connection. */
 export class SqliteExpenseStore
-  implements ExpenseStore, ExpenseCorrectionStore, MonthlyBudgetStore
+  implements
+    ExpenseStore,
+    ExpenseCorrectionStore,
+    MonthlyBudgetStore,
+    EventDeliveryStore
 {
   readonly #db: DatabaseSync;
   readonly #options: Options;
@@ -350,9 +369,15 @@ export class SqliteExpenseStore
         this.#db.exec(
           `PRAGMA application_id=${APPLICATION_ID}; PRAGMA user_version=1;`,
         );
-      } else if (version !== 1 && version !== 2 && version !== 3)
+      } else if (
+        version !== 1 &&
+        version !== 2 &&
+        version !== 3 &&
+        version !== 4
+      )
         throw new StorageError('STORAGE_SCHEMA');
-      this.#version = version === 3 ? 3 : version === 2 ? 2 : 1;
+      this.#version =
+        version === 4 ? 4 : version === 3 ? 3 : version === 2 ? 2 : 1;
       // Reject corrupted/foreign v1 before changing its schema or data.
       this.#verify();
       if (this.#version === 1) {
@@ -379,6 +404,23 @@ export class SqliteExpenseStore
         this.#options.afterMigration?.();
         this.#verify();
       }
+      if (this.#version === 3) {
+        this.#db.exec(migration004.sql);
+        this.#db
+          .prepare(
+            'INSERT INTO event_delivery_config(singleton,cursor_key) VALUES(1,?)',
+          )
+          .run(randomBytes(32).toString('hex'));
+        this.#db
+          .prepare(
+            'INSERT INTO schema_migrations(version,checksum) VALUES(?,?)',
+          )
+          .run(4, checksum004);
+        this.#db.exec('PRAGMA user_version=4');
+        this.#version = 4;
+        this.#options.afterMigration?.();
+        this.#verify();
+      }
       this.#db.exec('COMMIT');
     } catch (error) {
       if (this.#db.isTransaction) this.#db.exec('ROLLBACK');
@@ -392,7 +434,7 @@ export class SqliteExpenseStore
     if (
       this.#db.prepare('PRAGMA application_id').get()?.application_id !==
         APPLICATION_ID ||
-      ![1, 2, 3].includes(this.#version) ||
+      ![1, 2, 3, 4].includes(this.#version) ||
       this.#db.prepare('PRAGMA user_version').get()?.user_version !==
         this.#version
     )
@@ -414,9 +456,12 @@ export class SqliteExpenseStore
       (this.#version >= 2 &&
         (migrations[1]?.version !== 2 ||
           migrations[1]?.checksum !== checksum002)) ||
-      (this.#version === 3 &&
+      (this.#version >= 3 &&
         (migrations[2]?.version !== 3 ||
-          migrations[2]?.checksum !== checksum003))
+          migrations[2]?.checksum !== checksum003)) ||
+      (this.#version === 4 &&
+        (migrations[3]?.version !== 4 ||
+          migrations[3]?.checksum !== checksum004))
     )
       throw new StorageError('STORAGE_SCHEMA');
     if (
@@ -435,7 +480,7 @@ export class SqliteExpenseStore
     if (this.#version >= 2)
       for (const row of this.#db.prepare(correctionsJoined).iterate())
         this.#rehydrateCorrection(row);
-    if (this.#version === 3) {
+    if (this.#version >= 3) {
       for (const row of this.#db.prepare(budgetsJoined).iterate())
         rehydrateBudget(row);
       for (const row of this.#db
@@ -443,6 +488,7 @@ export class SqliteExpenseStore
         .iterate())
         this.#rehydrateAlert(row);
     }
+    if (this.#version === 4) new SqliteEventDelivery(this.#db).verify();
   }
 
   #run<T>(operation: () => T): T {
@@ -602,7 +648,7 @@ export class SqliteExpenseStore
   findIntent(scope: Scope, key: string): IntentResult | undefined {
     return this.#run(() =>
       this.#readSnapshot(() => {
-        if (this.#version === 3) {
+        if (this.#version >= 3) {
           const budget = this.#db
             .prepare(
               `${budgetsJoined} WHERE b.instance_ref=? AND b.subject_ref=? AND b.intent_key=?`,
@@ -1057,7 +1103,7 @@ export class SqliteExpenseStore
   ): MonthlyBudget {
     return this.#run(() => {
       if (this.#options.readOnly) throw new StorageError('STORAGE_READ_ONLY');
-      if (this.#version !== 3) throw new StorageError('STORAGE_SCHEMA');
+      if (this.#version < 3) throw new StorageError('STORAGE_SCHEMA');
       if (this.#writing) throw new StorageError('STORAGE_BUSY');
       identifier(scope.instanceRef);
       identifier(scope.subjectRef);
@@ -1172,6 +1218,40 @@ export class SqliteExpenseStore
         });
       }),
     );
+  }
+
+  listPending(scope: Scope, query: PendingEventQuery): PendingEventPage {
+    return this.#run(() =>
+      this.#readSnapshot(() => {
+        if (this.#version !== 4) throw new StorageError('STORAGE_SCHEMA');
+        return new SqliteEventDelivery(this.#db).listPending(scope, query);
+      }),
+    );
+  }
+
+  acknowledge(
+    scope: Scope,
+    eventId: string,
+    actorRef: string,
+    processedAt: string,
+  ): EventAcknowledgement {
+    return this.#run(() => {
+      if (this.#options.readOnly) throw new StorageError('STORAGE_READ_ONLY');
+      if (this.#version !== 4) throw new StorageError('STORAGE_SCHEMA');
+      if (this.#writing) throw new StorageError('STORAGE_BUSY');
+      this.#writing = true;
+      try {
+        return new SqliteEventDelivery(this.#db).acknowledge(
+          scope,
+          eventId,
+          actorRef,
+          processedAt,
+          this.#options,
+        );
+      } finally {
+        this.#writing = false;
+      }
+    });
   }
 
   close(): void {

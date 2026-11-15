@@ -1,6 +1,6 @@
 ﻿# Don Gastón — agente financiero independiente
 
-**Estado: Fase 1D, núcleo de presupuestos mensuales implementado y verificado localmente el 2026-11-14.** Categorías, gastos, correcciones auditables, presupuestos y eventos internos de alerta con SQLite aislado e idempotencia durable, exclusivamente con datos sintéticos. Se conserva el adaptador en memoria para el flujo previo. La Fase 1 completa sigue abierta; no existe API ni conexión con Sir Jarvis. Sin commits ni PR en este incremento.
+**Estado: Fase 1E, consulta y reconocimiento durable de eventos implementados y verificados localmente el 2026-11-14.** Categorías, gastos, correcciones, presupuestos y alertas con SQLite aislado, exclusivamente con datos sintéticos. Se conserva el adaptador en memoria para el flujo previo. La Fase 1 completa sigue abierta; no existe API ni conexión con Sir Jarvis. Sin commits ni PR en este incremento.
 
 Don Gastón es propietario de las reglas financieras; Sir Jarvis conserva canales, identidad conversacional, orquestación y confirmaciones. Solo el alcance descrito aquí está implementado; las demás reglas de producto siguen siendo requisitos. La referencia histórica se conserva sin cambios.
 
@@ -128,9 +128,9 @@ clave falla con `EXPENSE_ALREADY_CORRECTED`; misma clave con contenido distinto 
 inválido: `INVALID_CORRECTION`. `findIntent` mantiene las respuestas antiguas y devuelve
 también correcciones nuevas, sin reactivar gastos históricos.
 
-La apertura con escritura migra v1/v2→v3 transaccionalmente; preserva datos y huellas
+La apertura con escritura migra v1/v2/v3→v4 transaccionalmente; preserva datos y huellas
 anteriores. La apertura solo lectura de v1 no migra. Mantener el binario actualizado
-para bases v3: no hay downgrade. El adaptador en memoria conserva sus funcionalidades
+para bases v4: no hay downgrade. El adaptador en memoria conserva sus funcionalidades
 previas y no implementa el puerto de correcciones.
 
 ```powershell
@@ -187,6 +187,40 @@ mes, últimos importes confirmados si no hay respuesta y ajustes conversacionale
 No hay scheduler, entrega de eventos ni integración con Jarvis.
 [Informe completo y pruebas](docs/reviews/PHASE1_MONTHLY_BUDGETS.md).
 
+## Fase 1E: consulta y reconocimiento de eventos
+
+`EventDeliveryService` recibe el adaptador SQLite y la política de acceso; requiere
+`event:read` y `event:ack` respectivamente. Su contrato local v1 reutiliza los IDs de
+alertas existentes, mostrando solo tipo, ID, categoría, mes y umbral. No expone
+importes ni nombres. No se ha cotejado con el protocolo de Jarvis.
+
+```typescript
+import { EventDeliveryService } from './src/application/event-delivery-service.ts';
+
+const delivery = new EventDeliveryService(store, policy);
+const page = delivery.listPending(context, { limit: 50 });
+// Procesar y deduplicar duraderamente cada evento en el consumidor ANTES del ack.
+// Tras confirmar ese procesamiento:
+const receipt = delivery.acknowledge(context, { eventId: processedEvent.id });
+// Repetir el mismo eventId devuelve el recibo original.
+```
+
+Ejemplo de llamadas, no un worker ejecutable. Cursor opcional `page.nextCursor`,
+opaco y vinculado al ámbito; `null` termina el recorrido, no reconoce sus eventos.
+Nuevos eventos posteriores al inicio aparecen en otro recorrido. Ante interrupción,
+comenzar sin cursor recupera todo lo que siga pendiente. La consulta no reserva ni
+marca eventos como procesados; no hay vencimientos de reservas que gestionar.
+
+La entrega es **al menos una vez**: varios procesos pueden recibir lo mismo, y el
+consumidor debe deduplicar por ámbito/ID. Solo su confirmación explícita crea el
+reconocimiento durable. Este estado no prueba envío a Telegram ni lectura del usuario.
+Una respuesta perdida después del commit se resuelve reintentando el mismo ID.
+
+La migración v4 añade índice, metadatos de cursor y reconocimientos; conserva intactos
+eventos y movimientos anteriores. El adaptador en memoria no incorpora este puerto.
+No hay servidor, API, scheduler, cola externa, consumidor permanente ni canal.
+[Contrato v1](docs/EVENT_DELIVERY_CONTRACT_V1.md) · [Informe](docs/reviews/PHASE1_EVENT_DELIVERY.md).
+
 ## Estructura implementada y responsables
 
 | Ruta | Contenido / propietario |
@@ -210,6 +244,12 @@ En Fase 1 se delegaron revisión de dominio, pruebas y revisión de seguridad, s
 No se crearon carpetas vacías para capas futuras. Las interfaces de red siguen pendientes.
 
 ## Evidencia ejecutada
+
+Eventos, 2026-11-14: formato aplicado y `npm.cmd run check`, salida 0: formato,
+lint sin warnings, typecheck, **115/115 pruebas aprobadas** (91 previas + 24 nuevas)
+y build. Incluye paginación de 52 eventos, cursor inválido/ajeno, ACK idempotente,
+procesos concurrentes, fallos pre/postcommit, recuperación, migración v3→v4 y copias
+restauradas. Evidencia local en `.cache/event-delivery-check.log`.
 
 Presupuestos, 2026-11-14: `npm.cmd run format` y `npm.cmd run check`, salida 0:
 formato, lint sin warnings, typecheck, **91/91 pruebas aprobadas** (64 previas + 27
@@ -264,7 +304,7 @@ Versiones consultadas en npm antes de fijarlas: TypeScript 6.0.3, ESLint 10.14.0
 - [ADR-001](docs/adr/001-persistence.md) aprobado e implementado para categorías/gastos sintéticos. Antes de un piloto faltan objetivos operativos de respaldo/retención, permisos y recuperación ante fallos físicos.
 - [ADR-002](docs/adr/002-jarvis-contract.md): cotejo contractual y aprobación futura; el borrador no garantiza compatibilidad.
 - El núcleo presupuestario usa fracciones exactas y meses civiles explícitos. Redondeo de presentación y orquestación del ciclo mensual siguen pendientes; no se habilita copia automática de límites.
-- Fase 1 tiene gastos, correcciones y núcleo de presupuestos SQLite; su cierre completo sigue pendiente. Siguiente incremento propuesto: consulta paginada de eventos internos con un contrato de entrega/confirmación idempotente, todavía con fixtures y sin conectar canales.
+- Fase 1 tiene gastos, correcciones, presupuestos y consulta/reconocimiento de eventos SQLite; su cierre completo sigue pendiente. Siguiente incremento propuesto: un consumidor sintético que demuestre deduplicación durable de efectos y pruebas del contrato de integración, sin conectar canales.
 - Autenticación/autorización operativa, recibos privados, respaldo/restauración de información real, datos reales y despliegue siguen pendientes. La idempotencia y recuperación verificadas aquí son locales con fixtures; no certifican producción.
 - CI usa tags de acciones y la línea Node 24: posible deriva de versiones; no fue ejecutado remotamente. `.gitignore` no es un control de acceso ni garantiza ausencia de secretos.
 

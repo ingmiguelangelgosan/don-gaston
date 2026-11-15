@@ -43,6 +43,19 @@ No hay traslado de saldo, copia automática de límites ni mensajes. La revisió
 mensual conversacional requiere definir su orquestación antes de implementarse.
 El resto de los casos financieros de Fase 2 sigue pendiente. Fase 1 permanece abierta.
 
+### Fase 1E — Consulta y reconocimiento de eventos (2026-11-14)
+
+Implementados contrato local v1, feed de alertas pendientes con paginación estable
+y cursor opaco, reconocimientos durables idempotentes y migración SQLite v4 aditiva.
+Verificados **115/115 tests** (91 anteriores + 24 nuevos), incluidos aislamiento,
+concurrencia, reintentos, fallos pre/postcommit, reinicio, migración y restauración.
+Ver [informe](reviews/PHASE1_EVENT_DELIVERY.md) y [contrato](EVENT_DELIVERY_CONTRACT_V1.md).
+
+La entrega puede ser al menos una vez; se exige deduplicación del consumidor. No hay
+reservas, worker permanente, API ni canal. Pendientes: cotejo con Jarvis, identidad
+y autorización operativas, procesamiento/deduplicación externos y orquestación.
+La Fase 1 completa permanece abierta.
+
 ## Fase 2 — Casos financieros MVP
 
 - Orquestación pendiente de revisión mensual de presupuestos; gastos fijos, deudas,

@@ -166,6 +166,29 @@ Implementación y evidencia: [presupuestos mensuales](reviews/PHASE1_MONTHLY_BUD
 - Prohibido emitir recordatorios automáticos de cuotas, facturas o salario vencido sin autorización explícita.
 - Don Gastón propone eventos; Jarvis decide canal, preferencias, deduplicación de entrega.
 
+### 13.1 Consulta y reconocimiento local — Fase 1E, 2026-11-14
+
+- Se reutilizan los IDs de alertas ya persistidas. La proyección v1 expone solo
+  tipo, ID, categoría, mes y umbral; no importes, nombres, actor ni intención origen.
+- Consulta de pendientes por instancia/sujeto, orden durable y páginas de 1–100
+  elementos (50 por defecto). Cursor opaco autenticado y cifrado, vinculado al
+  ámbito y a un límite superior estable de recorrido. Consultar no modifica estados.
+- Reconocimiento explícito de procesamiento con permiso `event:ack`; consulta con
+  `event:read`. Son permisos distintos de gastos/presupuestos y se revalidan siempre.
+  Un reconocimiento no prueba entrega de un mensaje a un canal ni lectura del usuario.
+- Un consumidor lógico por instancia/sujeto, con posibles procesos concurrentes.
+  Sin reservas temporales. El primer reconocimiento confirma un registro durable;
+  repetir el mismo ID devuelve su recibo original, sin nuevos efectos.
+- Entrega **al menos una vez**: la futura contraparte debe deduplicar duraderamente
+  por ámbito/ID y reconocer después de procesar. Ante interrupción se puede comenzar
+  sin cursor; avanzar una página no reconoce sus eventos. Nuevos eventos posteriores
+  al límite de recorrido aparecen en el siguiente recorrido.
+- Reconocimientos separados de hechos financieros y alertas, sin modificar su
+  historia. No se revocan automáticamente cuando cambia el consumo presupuestario.
+
+Contrato local versionado: [consulta y reconocimiento v1](EVENT_DELIVERY_CONTRACT_V1.md).
+No está cotejado con Jarvis. No hay API pública, canal, scheduler ni entrega real.
+
 ## 14. Fuera de alcance y cuestiones abiertas
 
 - Sin importación masiva Excel, banca abierta, pagos/transferencias, manejo automático de apuestas, app móvil, WhatsApp, sincronización bancaria ni múltiples sujetos por instancia en MVP.
