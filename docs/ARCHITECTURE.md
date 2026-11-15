@@ -89,6 +89,25 @@ reconocimiento de procesamiento de entrega de notificaciones. No hay despachador
 API, scheduler ni integración con Jarvis. Su compatibilidad y deduplicación de
 efectos externos siguen pendientes de una decisión y pruebas de integración.
 
+## Deudas financiadas en modo simplificado
+
+Fase 1F incorpora dominio/puerto/servicio de deudas financiadas simplificadas y un
+componente `SqliteFinancedDebts` sobre la misma conexión. La migración aditiva v5
+separa aperturas históricas, resultados de pago e intenciones; no crea gastos
+ordinarios al registrar deuda o cuota. Un pago confirmado es un solo hecho con
+proyecciones de caja y saldo estimado. Las cuotas históricas solo son resumen.
+
+Las intenciones de deuda conservan huella y respuesta original, con FK recíprocas
+y claves únicas por ámbito. Triggers en ambos namespaces prohíben reutilizar una
+clave de categorías/gastos/presupuestos para deudas o viceversa. Saldo, remanente
+de cuota, decisión y escritura se resuelven bajo `BEGIN IMMEDIATE`; las lecturas
+usan snapshot. Al abrir se reconstruyen decisiones en orden de registro para
+comprobar saldos y revisiones, sin ordenar por fechas civiles retroactivas.
+
+El módulo no produce notificaciones ni cambia la semántica del feed de alertas.
+Tasa/condiciones son información registrada; conciliación con extractos y amortización
+avanzada siguen pendientes. Ver [Fase 1F](reviews/PHASE1_FINANCED_DEBTS.md).
+
 ## Integración con Jarvis: propuesta, no hecho
 
 - HTTPS + JSON versionado, autenticado; red privada o endpoint explícitamente autorizado.

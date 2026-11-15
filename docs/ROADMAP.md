@@ -56,6 +56,19 @@ reservas, worker permanente, API ni canal. Pendientes: cotejo con Jarvis, identi
 y autorización operativas, procesamiento/deduplicación externos y orquestación.
 La Fase 1 completa permanece abierta.
 
+### Incremento adelantado: Fase 1F — Deudas financiadas (2026-11-15)
+
+Por autorización explícita del usuario se implementa el primer incremento de deuda
+financiada dentro de Fase 1: apertura histórica, pagos confirmados completos/parciales
+por cuota y saldo estimado. Sin amortización avanzada ni gastos de consumo duplicados.
+Migración SQLite v5 aditiva, historia e idempotencia durables. **145/145 tests**:
+115 previos + 30 nuevos, con concurrencia, rollback, reinicio, restauración e integridad.
+Ver [informe](reviews/PHASE1_FINANCED_DEBTS.md).
+
+Pendientes: correcciones auditables de pagos, resolución de revisiones/conciliación,
+amortización informada y calendario detallado. La Fase 1 completa sigue abierta.
+Este incremento no autoriza el resto de casos de Fase 2 ni datos reales.
+
 ## Fase 2 — Casos financieros MVP
 
 - Orquestación pendiente de revisión mensual de presupuestos; gastos fijos, deudas,

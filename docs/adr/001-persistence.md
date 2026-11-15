@@ -7,6 +7,16 @@ No autoriza datos reales, despliegues, infraestructura o conexiones externas.
 Responsable: coordinador, con revisión de dominio/seguridad y pruebas independientes.
 La Fase 1 completa permanece abierta.
 
+Actualización Fase 1F, 2026-11-15: `005-financed-debts.ts` añade aperturas de deudas,
+resultados de pagos y sus intenciones sin reconstruir tablas previas. Dinero en
+texto canónico, cálculo `bigint`, FK recíprocas y unicidad por ámbito. Triggers en
+ambos namespaces impiden colisiones con intenciones financieras anteriores.
+La confirmación decide saldo/cuota y registra hecho, huella y respuesta en una
+transacción; un resultado de revisión no genera caja. Apertura en escritura migra
+hasta v5; el puerto nuevo exige v5, manteniendo consultas anteriores en versiones
+previas de solo lectura. Sin cambio de driver ni dependencias. No hay downgrade.
+Se mantienen las restricciones sintéticas. [Evidencia](../reviews/PHASE1_FINANCED_DEBTS.md).
+
 Actualización Fase 1E, 2026-11-14: migración aditiva `004-event-delivery.ts`, con índice
 secuencial, metadatos locales de cursor y reconocimientos append-only. No reconstruye
 ni modifica tablas históricas. El trigger de alerta crea su índice en la transacción

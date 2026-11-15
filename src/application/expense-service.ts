@@ -110,7 +110,11 @@ export class ExpenseService {
   findIntent(context: AccessContext, key: string) {
     const scope = this.#authorize(context, 'expense:read');
     const result = this.#store.findIntent(scope, identifier(key));
-    return result?.kind === 'budget' ? undefined : result;
+    return result?.kind === 'category' ||
+      result?.kind === 'expense' ||
+      result?.kind === 'correction'
+      ? result
+      : undefined;
   }
 
   monthlyTotals(

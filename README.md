@@ -1,6 +1,6 @@
 ﻿# Don Gastón — agente financiero independiente
 
-**Estado: Fase 1E, consulta y reconocimiento durable de eventos implementados y verificados localmente el 2026-11-14.** Categorías, gastos, correcciones, presupuestos y alertas con SQLite aislado, exclusivamente con datos sintéticos. Se conserva el adaptador en memoria para el flujo previo. La Fase 1 completa sigue abierta; no existe API ni conexión con Sir Jarvis. Sin commits ni PR en este incremento.
+**Estado: Fase 1F, deudas financiadas y pagos de cuotas implementados y verificados localmente el 2026-11-15.** Apertura histórica, pagos confirmados y saldo estimado, junto con gastos, correcciones, presupuestos y eventos previos en SQLite aislado. Exclusivamente datos sintéticos. Se conserva el adaptador en memoria para el flujo previo. La Fase 1 completa sigue abierta; no existe API ni conexión con Sir Jarvis. Sin commits ni PR en este incremento.
 
 Don Gastón es propietario de las reglas financieras; Sir Jarvis conserva canales, identidad conversacional, orquestación y confirmaciones. Solo el alcance descrito aquí está implementado; las demás reglas de producto siguen siendo requisitos. La referencia histórica se conserva sin cambios.
 
@@ -128,9 +128,9 @@ clave falla con `EXPENSE_ALREADY_CORRECTED`; misma clave con contenido distinto 
 inválido: `INVALID_CORRECTION`. `findIntent` mantiene las respuestas antiguas y devuelve
 también correcciones nuevas, sin reactivar gastos históricos.
 
-La apertura con escritura migra v1/v2/v3→v4 transaccionalmente; preserva datos y huellas
+La apertura con escritura migra v1/v2/v3/v4→v5 transaccionalmente; preserva datos y huellas
 anteriores. La apertura solo lectura de v1 no migra. Mantener el binario actualizado
-para bases v4: no hay downgrade. El adaptador en memoria conserva sus funcionalidades
+para bases v5: no hay downgrade. El adaptador en memoria conserva sus funcionalidades
 previas y no implementa el puerto de correcciones.
 
 ```powershell
@@ -221,6 +221,57 @@ eventos y movimientos anteriores. El adaptador en memoria no incorpora este puer
 No hay servidor, API, scheduler, cola externa, consumidor permanente ni canal.
 [Contrato v1](docs/EVENT_DELIVERY_CONTRACT_V1.md) · [Informe](docs/reviews/PHASE1_EVENT_DELIVERY.md).
 
+## Fase 1F: deuda financiada y pagos de cuotas
+
+`FinancedDebtService` recibe SQLite, política de acceso y reloj opcional. Exige
+`debt:write`, `debt:pay` o `debt:read`. Ejemplo con cifras exclusivamente ficticias
+en una composición local autorizada:
+
+```typescript
+import { FinancedDebtService } from './src/application/financed-debt-service.ts';
+
+const debts = new FinancedDebtService(store, policy);
+const debt = debts.registerDebt(context, 'synthetic-iphone-opening', {
+  description: 'iPhone ficticio',
+  financedAmount: '4800000',
+  installmentCount: 24,
+  installmentAmount: '250000',
+  referenceOn: '2026-11-01',
+  referenceBalance: '4000000',
+  historicalPaidInstallments: 8,
+  historicalPaidAmount: '2000000',
+}); // Tasa desconocida: no se inventa ni se trata como cero.
+
+const payment = debts.confirmPayment(context, 'synthetic-iphone-payment-9', {
+  debtId: debt.id,
+  installmentNumber: 9,
+  amount: '250000',
+  paidOn: '2026-11-15',
+  reference: 'synthetic-installment-9',
+});
+const status = debts.getDebt(context, debt.id);
+const cash = debts.monthlyCashOutflow(context, { month: '2026-11' });
+```
+
+Resultado: 8 cuotas históricas sin caja actual; cuota 9 confirmada, 15 cuotas nominales
+pendientes, saldo **estimado** de `3750000` COP y una sola salida de caja de `250000`
+COP. Repetir la misma intención devuelve el mismo pago. No aumenta el consumo mensual,
+no afecta presupuestos ni genera alertas. El dinero histórico no se resta otra vez
+del saldo de apertura. No se inventa capital amortizado ni intereses pagados.
+
+Los pagos parciales se vinculan a una cuota explícita. Excesos sobre saldo estimado
+o remanente nominal de la cuota quedan `review_required`, persistidos sin descontar
+saldo, generar caja ni repartir excedentes. `getDebt` incluye estos intentos con su
+estado; `monthlyCashOutflow` incluye únicamente pagos confirmados de deuda, no es
+un informe global de caja. Las fechas son civiles explícitas.
+
+No hay borradores de pago: `confirmPayment` registra una confirmación ya obtenida por
+la frontera autorizada. No ejecuta transferencias. Tasa E.A. y condiciones opcionales
+se conservan sin amortización automática; la referencia textual no sustituye la clave
+estable de idempotencia. Faltan conciliación, correcciones auditables de pagos y
+resolución de revisiones. No hay recordatorios.
+[Informe completo](docs/reviews/PHASE1_FINANCED_DEBTS.md).
+
 ## Estructura implementada y responsables
 
 | Ruta | Contenido / propietario |
@@ -244,6 +295,13 @@ En Fase 1 se delegaron revisión de dominio, pruebas y revisión de seguridad, s
 No se crearon carpetas vacías para capas futuras. Las interfaces de red siguen pendientes.
 
 ## Evidencia ejecutada
+
+Deudas financiadas, 2026-11-15: `npm.cmd run format` y `npm.cmd run check`, salida 0:
+formato, lint sin warnings, typecheck, **145/145 pruebas aprobadas** (115 previas +
+30 nuevas) y build. Caso iPhone 24/8, abonos, excesos en revisión, no duplicación
+caja/consumo, concurrencia, rollback, respuesta perdida, reinicio, restauración,
+migración v4→v5 e integridad semántica verificados. Registro en
+`.cache/financed-debts-check.log`; fixtures sintéticas retenidas bajo `.cache/`.
 
 Eventos, 2026-11-14: formato aplicado y `npm.cmd run check`, salida 0: formato,
 lint sin warnings, typecheck, **115/115 pruebas aprobadas** (91 previas + 24 nuevas)
@@ -304,7 +362,7 @@ Versiones consultadas en npm antes de fijarlas: TypeScript 6.0.3, ESLint 10.14.0
 - [ADR-001](docs/adr/001-persistence.md) aprobado e implementado para categorías/gastos sintéticos. Antes de un piloto faltan objetivos operativos de respaldo/retención, permisos y recuperación ante fallos físicos.
 - [ADR-002](docs/adr/002-jarvis-contract.md): cotejo contractual y aprobación futura; el borrador no garantiza compatibilidad.
 - El núcleo presupuestario usa fracciones exactas y meses civiles explícitos. Redondeo de presentación y orquestación del ciclo mensual siguen pendientes; no se habilita copia automática de límites.
-- Fase 1 tiene gastos, correcciones, presupuestos y consulta/reconocimiento de eventos SQLite; su cierre completo sigue pendiente. Siguiente incremento propuesto: un consumidor sintético que demuestre deduplicación durable de efectos y pruebas del contrato de integración, sin conectar canales.
+- Fase 1 tiene gastos, correcciones, presupuestos, eventos y deudas financiadas simplificadas en SQLite; su cierre completo sigue pendiente. Siguiente incremento recomendado: definir y probar correcciones auditables de pagos y conciliación de saldos reportados, sin alterar la historia ni integrar bancos.
 - Autenticación/autorización operativa, recibos privados, respaldo/restauración de información real, datos reales y despliegue siguen pendientes. La idempotencia y recuperación verificadas aquí son locales con fixtures; no certifican producción.
 - CI usa tags de acciones y la línea Node 24: posible deriva de versiones; no fue ejecutado remotamente. `.gitignore` no es un control de acceso ni garantiza ausencia de secretos.
 

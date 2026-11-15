@@ -129,7 +129,11 @@ export class ExpenseCorrectionsService {
       this.#authorize(context, 'expense:read'),
       identifier(key),
     );
-    return result?.kind === 'budget' ? undefined : result;
+    return result?.kind === 'category' ||
+      result?.kind === 'expense' ||
+      result?.kind === 'correction'
+      ? result
+      : undefined;
   }
   getExpenseHistory(context: AccessContext, expenseId: string) {
     return this.#store.getExpenseHistory(

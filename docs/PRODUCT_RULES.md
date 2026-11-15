@@ -110,6 +110,59 @@ Implementación y evidencia: [presupuestos mensuales](reviews/PHASE1_MONTHLY_BUD
 - Deudas previas al onboarding: resumen inicial histórico sin contabilizar cuotas anteriores como gasto actual.
 - Solo pagos **confirmados** reducen saldo; soportar parcial/total y fechas; sin recordatorios proactivos.
 
+### 4.1 Deudas financiadas simplificadas — Fase 1F, 2026-11-15
+
+Implementación autorizada del modo simplificado de la referencia original §4.
+No modifica el documento histórico ni implementa amortización informada.
+
+- Apertura explícita: descripción, valor financiado, número y valor nominal de
+  cuotas, fecha civil de referencia, saldo conocido reportado y número de cuotas
+  históricas pagadas. Dinero histórico desembolsado, tasa E.A. y condiciones son
+  opcionales: ausencia significa desconocido, nunca cero ni un valor inferido.
+- Las cuotas históricas se interpretan como las primeras N del plan. Se conserva
+  el resumen, sin reconstruir importes/fechas individuales, crear gastos o salidas
+  actuales ni descontar nuevamente ese dinero del saldo de referencia.
+- Los datos de apertura son reportados por el actor autorizado, no verificados por
+  un banco. La proyección siempre declara `balanceKind=estimated`; capital pendiente
+  e intereses pagados permanecen desconocidos (`null`), incluso con tasa informada.
+- La tasa se almacena como porcentaje E.A. decimal exacto no negativo, máximo seis
+  decimales y 100 caracteres; ceros finales se normalizan. Cero informado es distinto
+  de tasa ausente. No se redondea ni se convierte en tasa mensual. Condiciones se
+  conservan como texto, sin interpretar cargos ni inventar una tabla de amortización.
+- `confirmPayment` es la intención explícita de registrar un pago ya confirmado.
+  Exige deuda, cuota concreta, importe positivo, fecha civil igual/posterior a la
+  referencia y referencia textual. No es una instrucción para ejecutar un pago real.
+  No se admiten borradores, un `confirmed=true` editable ni confirmación por calendario.
+- Cada operación corresponde a una cuota posterior al resumen histórico. Se admiten
+  abonos parciales; varios abonos confirmados pueden completar su importe nominal.
+  No se asume FIFO ni se distribuye automáticamente un pago entre cuotas.
+- El saldo estimado es saldo de referencia menos pagos confirmados desde esa apertura.
+  Un pago confirmado es el único hecho de caja; la vista mensual de pagos de deuda
+  lo reutiliza sin crear otro movimiento. No entra en consumo, presupuestos ni eventos
+  de alertas. Esta vista de caja es específica de deudas, no un flujo global de caja.
+- Exceso sobre saldo estimado devuelve y persiste `review_required` con motivo
+  `EXCEEDS_ESTIMATED_BALANCE`. Exceso sobre remanente nominal de la cuota devuelve
+  `EXCEEDS_INSTALLMENT_REMAINDER`. Ninguno modifica saldo/caja ni reparte excedentes.
+  El historial distingue estos intentos de los pagos confirmados.
+- Los resultados de revisión también son idempotentes: reintentar devuelve la
+  decisión original aunque luego cambie el saldo. No se transforma silenciosamente
+  una revisión en pago. Resolverla exige una futura decisión explícita; no hay flujo
+  de conciliación o reasignación automática implementado.
+- Las proyecciones nominales y el saldo pueden diferir. `requiresReview` señala
+  saldo cero con cuotas pendientes, saldo positivo sin cuotas pendientes o dinero
+  histórico reportado sin cuotas completas identificadas. Se conserva la apertura
+  reportada sin inventar distribución ni dar por liquidada la deuda bancaria.
+- Permisos `debt:write`, `debt:pay` y `debt:read`, ámbito vinculado fuera del payload,
+  revalidación antes de replay y clave estable compartida con las otras mutaciones
+  financieras. Referencia textual no equivale a un identificador bancario único;
+  el origen debe conservar la misma clave ante reintentos.
+
+Límites locales: 1–1200 cuotas, descripción de 1–200 caracteres, condiciones de
+1–1000 y referencia de pago de 1–128, normalizadas sin controles internos. Importes
+COP exactos, con límites operativos de SQLite existentes. No hay vencimientos
+inferidos, recordatorios, corrección de pagos ni préstamos entre personas.
+[Implementación y pruebas](reviews/PHASE1_FINANCED_DEBTS.md).
+
 ## 5. Facturas y gastos fijos
 
 - Crear obligación mensual por concepto y periodo, inicialmente pendiente.
