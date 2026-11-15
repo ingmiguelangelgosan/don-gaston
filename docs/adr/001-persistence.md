@@ -7,6 +7,16 @@ No autoriza datos reales, despliegues, infraestructura o conexiones externas.
 Responsable: coordinador, con revisión de dominio/seguridad y pruebas independientes.
 La Fase 1 completa permanece abierta.
 
+Actualización Fase 1G, 2026-11-15: `006-debt-payment-corrections.ts` añade correcciones
+append-only y orden durable de acciones. Amplía `debt_intents` preservando sus columnas
+anteriores y respuestas exactas. FK recíprocas, relación explícita del reemplazo y
+unicidad parcial de correcciones aplicadas aseguran correspondencia y exclusión de
+escrituras incompatibles. Pago original y tablas financieras previas no se reescriben.
+Migración y mutaciones son transaccionales; el runner verifica v5 antes y v6 después.
+Escritura migra hasta v6; puertos anteriores siguen admitiendo solo lectura según
+su versión y correcciones de pagos exige v6. Sin cambio de driver, dependencias o
+autorización para información real. [Evidencia](../reviews/PHASE1_DEBT_PAYMENT_CORRECTIONS.md).
+
 Actualización Fase 1F, 2026-11-15: `005-financed-debts.ts` añade aperturas de deudas,
 resultados de pagos y sus intenciones sin reconstruir tablas previas. Dinero en
 texto canónico, cálculo `bigint`, FK recíprocas y unicidad por ámbito. Triggers en

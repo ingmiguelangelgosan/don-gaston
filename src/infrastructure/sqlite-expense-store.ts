@@ -34,6 +34,9 @@ import { migration002 } from './migrations/002-expense-corrections.ts';
 import { migration003 } from './migrations/003-monthly-budgets.ts';
 import { migration004 } from './migrations/004-event-delivery.ts';
 import { migration005 } from './migrations/005-financed-debts.ts';
+import { migration006 } from './migrations/006-debt-payment-corrections.ts';
+import type { DebtPaymentCorrectionStore } from '../application/debt-payment-correction-store.ts';
+import type { DebtPaymentCorrectionDraft } from '../domain/debt-payment-corrections.ts';
 import { SqliteFinancedDebts } from './sqlite-financed-debts.ts';
 import type { FinancedDebtStore } from '../application/financed-debt-store.ts';
 import type {
@@ -73,6 +76,7 @@ const checksum002 = createHash('sha256').update(migration002.sql).digest('hex');
 const checksum003 = createHash('sha256').update(migration003.sql).digest('hex');
 const checksum004 = createHash('sha256').update(migration004.sql).digest('hex');
 const checksum005 = createHash('sha256').update(migration005.sql).digest('hex');
+const checksum006 = createHash('sha256').update(migration006.sql).digest('hex');
 const schemaQuery =
   "SELECT type,name,tbl_name,sql FROM sqlite_schema WHERE name NOT GLOB 'sqlite_*' ORDER BY type,name";
 function expectedSchema(version: number): string {
@@ -84,6 +88,7 @@ function expectedSchema(version: number): string {
     if (version >= 3) database.exec(migration003.sql);
     if (version >= 4) database.exec(migration004.sql);
     if (version >= 5) database.exec(migration005.sql);
+    if (version >= 6) database.exec(migration006.sql);
     return JSON.stringify(database.prepare(schemaQuery).all());
   } finally {
     database.close();
@@ -96,6 +101,7 @@ const schemas = [
   expectedSchema(3),
   expectedSchema(4),
   expectedSchema(5),
+  expectedSchema(6),
 ];
 const joined = `SELECT f.*, i.fingerprint, i.result_json FROM facts f
   JOIN intents i ON i.instance_ref=f.instance_ref AND i.subject_ref=f.subject_ref
@@ -126,6 +132,7 @@ interface Options {
   readonly afterDebtInsert?: () => void;
   readonly afterDebtPaymentInsert?: () => void;
   readonly afterDebtCommit?: () => void;
+  readonly afterDebtCorrectionInsert?: () => void;
 }
 type Row = Record<string, unknown>;
 
@@ -291,7 +298,8 @@ export class SqliteExpenseStore
     ExpenseCorrectionStore,
     MonthlyBudgetStore,
     EventDeliveryStore,
-    FinancedDebtStore
+    FinancedDebtStore,
+    DebtPaymentCorrectionStore
 {
   readonly #db: DatabaseSync;
   readonly #options: Options;
@@ -390,19 +398,22 @@ export class SqliteExpenseStore
         version !== 2 &&
         version !== 3 &&
         version !== 4 &&
-        version !== 5
+        version !== 5 &&
+        version !== 6
       )
         throw new StorageError('STORAGE_SCHEMA');
       this.#version =
-        version === 5
-          ? 5
-          : version === 4
-            ? 4
-            : version === 3
-              ? 3
-              : version === 2
-                ? 2
-                : 1;
+        version === 6
+          ? 6
+          : version === 5
+            ? 5
+            : version === 4
+              ? 4
+              : version === 3
+                ? 3
+                : version === 2
+                  ? 2
+                  : 1;
       // Reject corrupted/foreign v1 before changing its schema or data.
       this.#verify();
       if (this.#version === 1) {
@@ -458,6 +469,18 @@ export class SqliteExpenseStore
         this.#options.afterMigration?.();
         this.#verify();
       }
+      if (this.#version === 5) {
+        this.#db.exec(migration006.sql);
+        this.#db
+          .prepare(
+            'INSERT INTO schema_migrations(version,checksum) VALUES(?,?)',
+          )
+          .run(6, checksum006);
+        this.#db.exec('PRAGMA user_version=6');
+        this.#version = 6;
+        this.#options.afterMigration?.();
+        this.#verify();
+      }
       this.#db.exec('COMMIT');
     } catch (error) {
       if (this.#db.isTransaction) this.#db.exec('ROLLBACK');
@@ -471,7 +494,7 @@ export class SqliteExpenseStore
     if (
       this.#db.prepare('PRAGMA application_id').get()?.application_id !==
         APPLICATION_ID ||
-      ![1, 2, 3, 4, 5].includes(this.#version) ||
+      ![1, 2, 3, 4, 5, 6].includes(this.#version) ||
       this.#db.prepare('PRAGMA user_version').get()?.user_version !==
         this.#version
     )
@@ -499,9 +522,12 @@ export class SqliteExpenseStore
       (this.#version >= 4 &&
         (migrations[3]?.version !== 4 ||
           migrations[3]?.checksum !== checksum004)) ||
-      (this.#version === 5 &&
+      (this.#version >= 5 &&
         (migrations[4]?.version !== 5 ||
-          migrations[4]?.checksum !== checksum005))
+          migrations[4]?.checksum !== checksum005)) ||
+      (this.#version === 6 &&
+        (migrations[5]?.version !== 6 ||
+          migrations[5]?.checksum !== checksum006))
     )
       throw new StorageError('STORAGE_SCHEMA');
     if (
@@ -529,7 +555,8 @@ export class SqliteExpenseStore
         this.#rehydrateAlert(row);
     }
     if (this.#version >= 4) new SqliteEventDelivery(this.#db).verify();
-    if (this.#version >= 5) new SqliteFinancedDebts(this.#db).verify();
+    if (this.#version >= 5)
+      new SqliteFinancedDebts(this.#db, this.#version).verify();
   }
 
   #run<T>(operation: () => T): T {
@@ -604,6 +631,7 @@ export class SqliteExpenseStore
             previous.kind === 'budget' ||
             previous.kind === 'financed-debt' ||
             previous.kind === 'debt-payment' ||
+            previous.kind === 'debt-payment-correction' ||
             hash(previous) !== fingerprint ||
             previous.kind !== result.kind
           )
@@ -692,7 +720,10 @@ export class SqliteExpenseStore
     return this.#run(() =>
       this.#readSnapshot(() => {
         if (this.#version >= 5) {
-          const debt = new SqliteFinancedDebts(this.#db).findIntent(scope, key);
+          const debt = new SqliteFinancedDebts(
+            this.#db,
+            this.#version,
+          ).findIntent(scope, key);
           if (debt) return debt;
         }
         if (this.#version >= 3) {
@@ -1308,7 +1339,7 @@ export class SqliteExpenseStore
       if (this.#writing) throw new StorageError('STORAGE_BUSY');
       this.#writing = true;
       try {
-        return operation(new SqliteFinancedDebts(this.#db));
+        return operation(new SqliteFinancedDebts(this.#db, this.#version));
       } finally {
         this.#writing = false;
       }
@@ -1355,7 +1386,10 @@ export class SqliteExpenseStore
     return this.#run(() =>
       this.#readSnapshot(() => {
         if (this.#version < 5) throw new StorageError('STORAGE_SCHEMA');
-        return new SqliteFinancedDebts(this.#db).getDebt(scope, debtId);
+        return new SqliteFinancedDebts(this.#db, this.#version).getDebt(
+          scope,
+          debtId,
+        );
       }),
     );
   }
@@ -1364,10 +1398,40 @@ export class SqliteExpenseStore
     return this.#run(() =>
       this.#readSnapshot(() => {
         if (this.#version < 5) throw new StorageError('STORAGE_SCHEMA');
-        return new SqliteFinancedDebts(this.#db).monthlyCashOutflow(
-          scope,
-          month,
-        );
+        return new SqliteFinancedDebts(
+          this.#db,
+          this.#version,
+        ).monthlyCashOutflow(scope, month);
+      }),
+    );
+  }
+
+  correctPayment(
+    scope: Scope,
+    key: string,
+    fingerprint: string,
+    draft: DebtPaymentCorrectionDraft,
+  ) {
+    return this.#debtWrite((module) => {
+      if (this.#version < 6) throw new StorageError('STORAGE_SCHEMA');
+      return module.correctPayment(
+        scope,
+        key,
+        fingerprint,
+        draft,
+        (bound, intent) => this.findIntent(bound, intent),
+        this.#options,
+      );
+    });
+  }
+  getPaymentHistory(scope: Scope, paymentId: string) {
+    return this.#run(() =>
+      this.#readSnapshot(() => {
+        if (this.#version < 6) throw new StorageError('STORAGE_SCHEMA');
+        return new SqliteFinancedDebts(
+          this.#db,
+          this.#version,
+        ).getPaymentHistory(scope, paymentId);
       }),
     );
   }

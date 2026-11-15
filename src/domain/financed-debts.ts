@@ -67,6 +67,8 @@ export interface DebtStatus {
   readonly interestPaid: null;
   readonly requiresReview: boolean;
   readonly payments: readonly DebtPaymentResult[];
+  /** Current confirmed facts only; payments retains the complete record history. */
+  readonly effectivePayments: readonly DebtPaymentResult[];
   readonly installments: readonly DebtInstallmentStatus[];
   readonly confirmedPaymentsTotal: Money;
 }
@@ -251,6 +253,9 @@ export function buildDebtStatus(
     interestPaid: null,
     requiresReview,
     payments: Object.freeze([...payments]),
+    effectivePayments: Object.freeze(
+      payments.filter((payment) => payment.status === 'confirmed'),
+    ),
     installments: Object.freeze(installments),
     confirmedPaymentsTotal: Money.fromMinor(total),
   });

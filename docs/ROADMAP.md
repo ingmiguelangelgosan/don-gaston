@@ -65,9 +65,22 @@ Migración SQLite v5 aditiva, historia e idempotencia durables. **145/145 tests*
 115 previos + 30 nuevos, con concurrencia, rollback, reinicio, restauración e integridad.
 Ver [informe](reviews/PHASE1_FINANCED_DEBTS.md).
 
-Pendientes: correcciones auditables de pagos, resolución de revisiones/conciliación,
-amortización informada y calendario detallado. La Fase 1 completa sigue abierta.
+Pendientes tras este incremento: correcciones auditables de pagos (incorporadas
+posteriormente en Fase 1G), resolución de revisiones/conciliación, amortización
+informada y calendario detallado. La Fase 1 completa sigue abierta.
 Este incremento no autoriza el resto de casos de Fase 2 ni datos reales.
+
+### Fase 1G — Correcciones auditables de pagos (2026-11-15)
+
+Implementadas anulación/reemplazo de pagos confirmados, motivo/actor/instante,
+historial enlazado, proyecciones vigentes y revisión durable de reemplazos que
+exceden capacidad al considerar pagos posteriores. SQLite v6 preserva historia e
+intenciones; no modela devoluciones bancarias. **170/170 tests**: 145 previos + 25
+nuevos, con concurrencia, rollback, restauración y migración desde v5.
+[Informe](reviews/PHASE1_DEBT_PAYMENT_CORRECTIONS.md).
+
+Pendientes: resolución asistida de revisiones, conciliación explícita y amortización
+informada. No se habilita operación real ni se declara completa la Fase 1.
 
 ## Fase 2 — Casos financieros MVP
 

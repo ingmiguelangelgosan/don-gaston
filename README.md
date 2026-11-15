@@ -1,6 +1,6 @@
 ﻿# Don Gastón — agente financiero independiente
 
-**Estado: Fase 1F, deudas financiadas y pagos de cuotas implementados y verificados localmente el 2026-11-15.** Apertura histórica, pagos confirmados y saldo estimado, junto con gastos, correcciones, presupuestos y eventos previos en SQLite aislado. Exclusivamente datos sintéticos. Se conserva el adaptador en memoria para el flujo previo. La Fase 1 completa sigue abierta; no existe API ni conexión con Sir Jarvis. Sin commits ni PR en este incremento.
+**Estado: Fase 1G, correcciones auditables de pagos implementadas y verificadas localmente el 2026-11-15.** Anulación/reemplazo, historial y proyecciones vigentes de saldo estimado, cuotas y caja, sobre los módulos previos en SQLite aislado. Exclusivamente datos sintéticos. Se conserva el adaptador en memoria para el flujo previo. La Fase 1 completa sigue abierta; no existe API ni conexión con Sir Jarvis. Sin commits ni PR en este incremento.
 
 Don Gastón es propietario de las reglas financieras; Sir Jarvis conserva canales, identidad conversacional, orquestación y confirmaciones. Solo el alcance descrito aquí está implementado; las demás reglas de producto siguen siendo requisitos. La referencia histórica se conserva sin cambios.
 
@@ -128,9 +128,9 @@ clave falla con `EXPENSE_ALREADY_CORRECTED`; misma clave con contenido distinto 
 inválido: `INVALID_CORRECTION`. `findIntent` mantiene las respuestas antiguas y devuelve
 también correcciones nuevas, sin reactivar gastos históricos.
 
-La apertura con escritura migra v1/v2/v3/v4→v5 transaccionalmente; preserva datos y huellas
+La apertura con escritura migra v1–v5→v6 transaccionalmente; preserva datos y huellas
 anteriores. La apertura solo lectura de v1 no migra. Mantener el binario actualizado
-para bases v5: no hay downgrade. El adaptador en memoria conserva sus funcionalidades
+para bases v6: no hay downgrade. El adaptador en memoria conserva sus funcionalidades
 previas y no implementa el puerto de correcciones.
 
 ```powershell
@@ -268,9 +268,51 @@ un informe global de caja. Las fechas son civiles explícitas.
 No hay borradores de pago: `confirmPayment` registra una confirmación ya obtenida por
 la frontera autorizada. No ejecuta transferencias. Tasa E.A. y condiciones opcionales
 se conservan sin amortización automática; la referencia textual no sustituye la clave
-estable de idempotencia. Faltan conciliación, correcciones auditables de pagos y
-resolución de revisiones. No hay recordatorios.
+estable de idempotencia. Faltan conciliación y resolución asistida de revisiones.
+Las correcciones auditables se describen abajo. No hay recordatorios.
 [Informe completo](docs/reviews/PHASE1_FINANCED_DEBTS.md).
+
+## Fase 1G: corregir un pago registrado por error
+
+`DebtPaymentCorrectionsService` exige `debt:correct` para mutar y `debt:read` para
+consultar. Con el pago sintético anterior de 250.000 COP:
+
+```typescript
+import { DebtPaymentCorrectionsService } from './src/application/debt-payment-corrections-service.ts';
+
+const corrections = new DebtPaymentCorrectionsService(store, policy);
+const correction = corrections.replacePayment(context, 'synthetic-correction-9', {
+  paymentId: payment.id,
+  reason: 'El importe registrado era incorrecto',
+  replacement: {
+    installmentNumber: 9,
+    amount: '200000',
+    currency: 'COP',
+    paidOn: '2026-11-15',
+    reference: 'synthetic-corrected-payment-9',
+  },
+});
+const history = corrections.getPaymentHistory(context, payment.id);
+```
+
+Con saldo de referencia de 4.000.000 COP, queda **3.800.000 COP estimado** y caja
+vigente de **200.000 COP**. El original permanece en auditoría con estado `replaced`;
+el nuevo pago enlaza hacia él. La cuota 9 queda parcial con 50.000 COP nominales
+pendientes. `voidPayment(context, key, {paymentId, reason})` retira un registro
+equivocado sin crear reembolso ni movimiento negativo: no sirve para representar
+una devolución bancaria real.
+
+Los reemplazos se validan contra todos los otros pagos vigentes, incluidos los
+posteriores. Si no caben en saldo/cuota, el evento queda `review_required` y el
+original continúa vigente. Reintentos conservan el resultado original; solo una
+corrección aplicada puede retirar cada pago. Se puede corregir su reemplazo vigente.
+
+`getDebt.payments` conserva todos los registros históricos; `effectivePayments`
+identifica los confirmados que contribuyen a saldo/cuotas/caja. Los recibos antiguos
+conservan su `estimatedBalanceAfter` original, que no representa necesariamente el
+saldo actual. Las consultas mensuales muestran caja vigente; no ofrecen consultas
+«como se veía entonces». No se modifican consumo ni alertas de presupuesto.
+[Informe completo](docs/reviews/PHASE1_DEBT_PAYMENT_CORRECTIONS.md).
 
 ## Estructura implementada y responsables
 
@@ -295,6 +337,12 @@ En Fase 1 se delegaron revisión de dominio, pruebas y revisión de seguridad, s
 No se crearon carpetas vacías para capas futuras. Las interfaces de red siguen pendientes.
 
 ## Evidencia ejecutada
+
+Correcciones de pagos, 2026-11-15: `npm.cmd run format` y `npm.cmd run check`, salida
+0: formato, lint sin warnings, typecheck, **170/170 pruebas aprobadas** (145 previas
++ 25 nuevas) y build. Caso 250.000→200.000, anulación, cadenas, cambios de fecha/cuota,
+revisión por pagos posteriores, concurrencia, rollback, reinicio, restauración e
+historia v5 conservada. Registro local: `.cache/debt-payment-corrections-check.log`.
 
 Deudas financiadas, 2026-11-15: `npm.cmd run format` y `npm.cmd run check`, salida 0:
 formato, lint sin warnings, typecheck, **145/145 pruebas aprobadas** (115 previas +
@@ -362,7 +410,7 @@ Versiones consultadas en npm antes de fijarlas: TypeScript 6.0.3, ESLint 10.14.0
 - [ADR-001](docs/adr/001-persistence.md) aprobado e implementado para categorías/gastos sintéticos. Antes de un piloto faltan objetivos operativos de respaldo/retención, permisos y recuperación ante fallos físicos.
 - [ADR-002](docs/adr/002-jarvis-contract.md): cotejo contractual y aprobación futura; el borrador no garantiza compatibilidad.
 - El núcleo presupuestario usa fracciones exactas y meses civiles explícitos. Redondeo de presentación y orquestación del ciclo mensual siguen pendientes; no se habilita copia automática de límites.
-- Fase 1 tiene gastos, correcciones, presupuestos, eventos y deudas financiadas simplificadas en SQLite; su cierre completo sigue pendiente. Siguiente incremento recomendado: definir y probar correcciones auditables de pagos y conciliación de saldos reportados, sin alterar la historia ni integrar bancos.
+- Fase 1 incluye correcciones auditables de pagos; su cierre completo sigue pendiente. Siguiente incremento recomendado: diseñar la resolución explícita de revisiones y conciliación de saldos reportados, con fixtures y sin integrar bancos.
 - Autenticación/autorización operativa, recibos privados, respaldo/restauración de información real, datos reales y despliegue siguen pendientes. La idempotencia y recuperación verificadas aquí son locales con fixtures; no certifican producción.
 - CI usa tags de acciones y la línea Node 24: posible deriva de versiones; no fue ejecutado remotamente. `.gitignore` no es un control de acceso ni garantiza ausencia de secretos.
 

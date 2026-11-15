@@ -160,8 +160,48 @@ No modifica el documento histórico ni implementa amortización informada.
 Límites locales: 1–1200 cuotas, descripción de 1–200 caracteres, condiciones de
 1–1000 y referencia de pago de 1–128, normalizadas sin controles internos. Importes
 COP exactos, con límites operativos de SQLite existentes. No hay vencimientos
-inferidos, recordatorios, corrección de pagos ni préstamos entre personas.
+inferidos, recordatorios ni préstamos entre personas. Las correcciones de pagos
+se incorporan mediante el incremento siguiente.
 [Implementación y pruebas](reviews/PHASE1_FINANCED_DEBTS.md).
+
+### 4.2 Correcciones de pagos — Fase 1G, 2026-11-15
+
+- Una intención explícita y autorizada puede anular un pago confirmado vigente o
+  reemplazarlo por un pago con importe, fecha, referencia o cuota corregidos.
+  Requiere motivo; conserva actor, instante UTC de registro y vínculos de auditoría.
+- La corrección subsana un registro equivocado. **No representa una devolución
+  bancaria real**, ni crea ingreso, reembolso o movimiento negativo. Una devolución
+  real requiere otro modelo todavía no implementado.
+- El reemplazo es completo: cuota, importe positivo, moneda COP explícita, fecha
+  civil y referencia. Permanece en la misma deuda; no se trasladan pagos entre deudas.
+  Sigue respetando la fecha de referencia y el resumen histórico de cuotas.
+- Original, respuesta idempotente y eventos permanecen inmutables. Solo se puede
+  corregir un pago confirmado vigente, una vez de forma aplicada. Puede corregirse
+  después su reemplazo vigente, formando una cadena. Un intento en revisión no es
+  un pago confirmado que pueda anularse.
+- Saldo estimado, progreso nominal de cuotas y caja mensual se calculan con pagos
+  efectivos. `getDebt.payments` conserva todos los registros; `effectivePayments`
+  identifica los confirmados vigentes. Un cambio de fecha mueve su contribución
+  entre meses civiles; el momento de la corrección queda en el evento de auditoría.
+- Antes de aplicar un reemplazo se retira hipotéticamente el original y se valida
+  el candidato contra **todos** los otros pagos vigentes, incluidos los posteriores.
+  Si supera saldo o remanente de cuota, se registra `review_required`, sin retirar
+  el original, crear reemplazo, afectar caja ni repartir excedentes.
+- La revisión conserva la propuesta y su decisión original. Ni pagos ni correcciones
+  antiguas en revisión se promueven automáticamente al cambiar la capacidad disponible.
+  Una petición distinta tras revisar requiere una intención nueva; no sobrescribe la
+  decisión anterior ni activa un proceso automático de resolución.
+- Mismo key/contenido devuelve el evento original antes de reevaluar vigencia;
+  contenido diferente produce conflicto. Dos correcciones aplicadas del mismo pago
+  se excluyen transaccionalmente. Comparte namespace de intención financiera.
+- Permiso `debt:correct` para mutar y `debt:read` para consultar auditoría/intención,
+  vinculados a instancia/sujeto y revalidados antes de replay. Un ID ajeno es inexistente.
+- No se recalculan ni sobrescriben saldos guardados como evidencia de decisiones
+  anteriores; la consulta vigente se reconstruye de la historia. El saldo sigue
+  siendo estimado, sin inferir capital, intereses o comisiones.
+- La corrección no crea gastos ordinarios ni alertas presupuestarias o de vencimiento.
+
+[API, migración y evidencia](reviews/PHASE1_DEBT_PAYMENT_CORRECTIONS.md).
 
 ## 5. Facturas y gastos fijos
 

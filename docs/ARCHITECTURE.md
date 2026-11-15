@@ -108,6 +108,18 @@ El módulo no produce notificaciones ni cambia la semántica del feed de alertas
 Tasa/condiciones son información registrada; conciliación con extractos y amortización
 avanzada siguen pendientes. Ver [Fase 1F](reviews/PHASE1_FINANCED_DEBTS.md).
 
+Fase 1G añade `DebtPaymentCorrectionsService` y su puerto. La migración v6 conserva
+pagos y resultados previos, amplía la relación de intenciones con correcciones y
+añade una secuencia de acciones para reconstruir decisiones en orden de registro.
+Una corrección puede producir un reemplazo confirmado o un resultado de revisión
+sin efecto financiero. Su evento, reemplazo opcional e intención comparten commit.
+
+La vista vigente excluye pagos retirados por correcciones aplicadas. La verificación
+histórica reproduce pagos y correcciones en su orden durable, conservando las
+decisiones que eran válidas entonces; no reinterpreta una revisión antigua con el
+saldo actual. Las fechas civiles determinan caja por mes, no ese orden de auditoría.
+Ver [Fase 1G](reviews/PHASE1_DEBT_PAYMENT_CORRECTIONS.md).
+
 ## Integración con Jarvis: propuesta, no hecho
 
 - HTTPS + JSON versionado, autenticado; red privada o endpoint explícitamente autorizado.

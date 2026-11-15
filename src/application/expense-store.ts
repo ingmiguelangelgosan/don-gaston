@@ -1,6 +1,7 @@
 import type { Category, Expense } from '../domain/expenses.ts';
 import type { ExpenseCorrection } from '../domain/expense-corrections.ts';
 import type { MonthlyBudget } from '../domain/monthly-budgets.ts';
+import type { DebtPaymentCorrection } from '../domain/debt-payment-corrections.ts';
 import type {
   FinancedDebt,
   DebtPaymentResult,
@@ -23,7 +24,8 @@ export type Action =
   | 'event:ack'
   | 'debt:write'
   | 'debt:pay'
-  | 'debt:read';
+  | 'debt:read'
+  | 'debt:correct';
 export interface AccessPolicy {
   allows(context: AccessContext, action: Action): boolean;
 }
@@ -37,7 +39,8 @@ export type IntentResult =
   | ExpenseCorrection
   | MonthlyBudget
   | FinancedDebt
-  | DebtPaymentResult;
+  | DebtPaymentResult
+  | DebtPaymentCorrection;
 
 /**
  * Implementations must atomically commit intent fingerprint + immutable fact.
