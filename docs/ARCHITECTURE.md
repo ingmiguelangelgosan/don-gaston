@@ -53,9 +53,24 @@ No crear carpetas vacías solo por coincidir con el esquema. No crear múltiples
 
 **Confirmación:** operaciones ambiguas o delicadas deben volver al canal original; la confirmación liga actor, sujeto, operación, monto, moneda y vencimiento. No confiar en `confirmed=true` escrito libremente.
 
-## Persistencia: decisión pendiente (ADR-001)
+## Persistencia local aprobada (ADR-001)
 
-Comparar PostgreSQL/Supabase vs SQLite local para primera instancia: fiabilidad transaccional, idempotencia, restauración, retención, control de acceso, costo y despliegue independiente. **No reutilizar la base SQLite de Jarvis**. Decidir en Fase 0 antes de implementar migraciones. Preferencia por bajo costo/autohospedaje; no inventar compatibilidad ni desplegar Supabase sin aprobación.
+SQLite local aislado está aprobado exclusivamente para datos sintéticos en
+[ADR-001](adr/001-persistence.md). El adaptador usa `node:sqlite`, importes como texto
+canónico y aritmética `bigint`. **No reutilizar la base SQLite de Jarvis**. Esto no
+autoriza despliegue, información real ni un servicio multiusuario.
+
+Fase 1D incorpora un puerto `MonthlyBudgetStore` y servicio determinista, separados
+de canales. SQLite implementa revisiones de presupuesto y eventos internos; el
+adaptador en memoria conserva su flujo de gastos previo. Consumo se proyecta desde
+gastos vigentes, sin duplicar hechos ni materializar saldos que puedan desincronizarse.
+Cada mutación evalúa los presupuestos afectados antes del mismo commit que confirma
+su intención. Las lecturas de presupuesto, consumo y alertas comparten snapshot.
+
+La migración v3 conserva hechos, intenciones y correcciones anteriores. No hay
+despachador de eventos, scheduler ni outbox de entrega implementados: la futura
+orquestación deberá definir lectura/confirmación de entrega y deduplicación sin
+confundir un evento persistido con una notificación ya enviada.
 
 ## Integración con Jarvis: propuesta, no hecho
 

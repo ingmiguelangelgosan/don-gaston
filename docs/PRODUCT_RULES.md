@@ -60,6 +60,48 @@ Implementación y evidencia: [correcciones de Fase 1](reviews/PHASE1_EXPENSE_COR
 - Alertar una vez por categoría/mes al cruzar 80 % y otra al 100 %; si pasa directamente al 100 %, notificar solo el 100 % en esa operación.
 - Limitar avisos, no repetir; reiniciar flags el siguiente mes. No emitir notificaciones automáticamente desde el agente sin autorización de Jarvis.
 
+### 3.1 Núcleo aprobado de Fase 1D — 2026-11-14
+
+- Presupuesto explícito por instancia, sujeto, categoría y mes civil `YYYY-MM`;
+  COP exacto. Categoría sin presupuesto devuelve ausencia, distinta de un límite
+  de cero. No se crea el presupuesto del mes siguiente ni se arrastra saldo.
+- **Decisión explícita del usuario sobre cero:** consumo cero no genera alertas;
+  consumo positivo con límite cero genera solo el evento del 100 %. El porcentaje
+  es no definido cuando el límite es cero o no existe presupuesto.
+- El porcentaje se representa como fracción exacta `consumo * 100 / presupuesto`,
+  con numerador y denominador `bigint`. No se redondea para decidir umbrales.
+- Establecer un presupuesto con una intención nueva añade una revisión; la última
+  revisión confirmada de esa categoría/mes es vigente. No borra las anteriores ni
+  modifica gastos. Repetir una intención devuelve su revisión original, sin volver
+  a hacerla vigente. Meses distintos permanecen independientes.
+- El consumo utiliza únicamente gastos vigentes según su fecha civil. Anular o
+  reemplazar actualiza las categorías/meses afectados dentro de la misma transacción.
+  Presupuesto y consumo no son saldos de caja ni obligaciones pendientes.
+- Establecer/revisar un presupuesto evalúa también el consumo ya registrado. Un
+  gasto o corrección evalúa los periodos afectados una vez aplicada la operación
+  completa, sin observar transitoriamente original y reemplazo juntos.
+- Eventos internos persistidos al alcanzar/superar 80 % y 100 %, como máximo uno
+  por umbral/categoría/mes/ámbito. Si ambos se alcanzan en una operación, solo 100 %.
+  Un evento de 100 % suprime un aviso posterior de 80 % para ese mismo periodo.
+  Correcciones, ajustes de presupuesto, reintentos y reinicios no borran ni reemiten
+  eventos previos. Cada evento conserva presupuesto evaluado, consumo e intención
+  que lo originó; representa evidencia histórica, no necesariamente consumo actual.
+- Permisos `budget:write` y `budget:read`, revalidados antes de reintentos. Las
+  intenciones comparten namespace con gastos/correcciones; cada servicio consulta
+  solo resultados de su dominio. Ausencia en esa consulta no autoriza reutilizar
+  una clave de otro dominio: la mutación sigue devolviendo conflicto.
+- Presupuesto, intención y alertas se confirman juntos. Un fallo en alertas revierte
+  también el gasto, corrección o presupuesto que las originaba.
+
+La revisión mensual automática queda **pendiente**: un único mensaje al comenzar el
+mes, reutilizar los últimos importes confirmados si no hay respuesta y permitir
+ajustes conversacionales. Esto copia límites, nunca saldo disponible. Requiere
+definir quién inicia el ciclo, zona horaria/calendario, plazo de respuesta,
+confirmación, clave estable y deduplicación de entrega con la futura orquestación.
+Este núcleo no envía mensajes, no programa tareas ni copia automáticamente límites.
+
+Implementación y evidencia: [presupuestos mensuales](reviews/PHASE1_MONTHLY_BUDGETS.md).
+
 ## 4. Deudas financiadas
 
 - Capturar valor, cuotas, monto de cuota, tasa efectiva anual si existe, calendario, saldo inicial conocido. Ausencia de tasa no bloquea el alta.

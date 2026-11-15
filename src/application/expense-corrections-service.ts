@@ -125,10 +125,11 @@ export class ExpenseCorrectionsService {
     );
   }
   findIntent(context: AccessContext, key: string) {
-    return this.#store.findIntent(
+    const result = this.#store.findIntent(
       this.#authorize(context, 'expense:read'),
       identifier(key),
     );
+    return result?.kind === 'budget' ? undefined : result;
   }
   getExpenseHistory(context: AccessContext, expenseId: string) {
     return this.#store.getExpenseHistory(

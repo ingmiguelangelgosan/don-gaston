@@ -7,6 +7,15 @@ No autoriza datos reales, despliegues, infraestructura o conexiones externas.
 Responsable: coordinador, con revisión de dominio/seguridad y pruebas independientes.
 La Fase 1 completa permanece abierta.
 
+Actualización Fase 1D, 2026-11-14: `003-monthly-budgets.ts` incorpora revisiones de
+presupuestos y alertas internas append-only. Amplía el namespace de `intents` con
+`budget_id`, exclusivo de hechos/correcciones, y conserva las columnas históricas
+sin cambiar huellas ni resultados. Apertura con escritura migra v1/v2 a v3 en una
+transacción; solo lectura admite v1/v2 sin migrar. Versiones anteriores del binario
+rechazan v3; no existe downgrade. La generación de alertas comparte la transacción
+del gasto, corrección o presupuesto. No se añade driver ni tecnología. Se mantienen
+todas las limitaciones de uso sintético. [Evidencia](../reviews/PHASE1_MONTHLY_BUDGETS.md).
+
 Actualización 2026-11-14: correcciones auditables aprobadas por el usuario. La migración
 `002-expense-corrections.ts` añade eventos append-only y amplía `intents` para aceptar
 anulación sin gasto nuevo o reemplazo atómico. La migración 001 permanece intacta.

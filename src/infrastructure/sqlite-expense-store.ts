@@ -8,7 +8,12 @@ import type {
   Scope,
 } from '../application/expense-store.ts';
 import { DomainError } from '../domain/errors.ts';
-import { calendarDate, categoryName, identifier } from '../domain/expenses.ts';
+import {
+  calendarDate,
+  calendarMonth,
+  categoryName,
+  identifier,
+} from '../domain/expenses.ts';
 import type { Category, Expense } from '../domain/expenses.ts';
 import type {
   ExpenseCorrection,
@@ -26,6 +31,15 @@ import { correctionFingerprint } from '../application/expense-corrections-servic
 import { Money } from '../domain/money.ts';
 import { migration001 } from './migrations/001-expenses.ts';
 import { migration002 } from './migrations/002-expense-corrections.ts';
+import { migration003 } from './migrations/003-monthly-budgets.ts';
+import type { MonthlyBudgetStore } from '../application/monthly-budget-store.ts';
+import { budgetFingerprint } from '../application/monthly-budget-service.ts';
+import { budgetThreshold } from '../domain/monthly-budgets.ts';
+import type {
+  MonthlyBudget,
+  BudgetAlert,
+  BudgetStatus,
+} from '../domain/monthly-budgets.ts';
 import { StorageError, storageError } from './sqlite-errors.ts';
 
 export const SQLITE_LIMITS = Object.freeze({
@@ -37,6 +51,7 @@ export const SQLITE_LIMITS = Object.freeze({
 const APPLICATION_ID = 0x44474153;
 const checksum = createHash('sha256').update(migration001.sql).digest('hex');
 const checksum002 = createHash('sha256').update(migration002.sql).digest('hex');
+const checksum003 = createHash('sha256').update(migration003.sql).digest('hex');
 const schemaQuery =
   "SELECT type,name,tbl_name,sql FROM sqlite_schema WHERE name NOT GLOB 'sqlite_*' ORDER BY type,name";
 function expectedSchema(version: number): string {
@@ -44,13 +59,19 @@ function expectedSchema(version: number): string {
   try {
     database.exec('PRAGMA foreign_keys=OFF');
     database.exec(migration001.sql);
-    if (version === 2) database.exec(migration002.sql);
+    if (version >= 2) database.exec(migration002.sql);
+    if (version >= 3) database.exec(migration003.sql);
     return JSON.stringify(database.prepare(schemaQuery).all());
   } finally {
     database.close();
   }
 }
-const schemas = [undefined, expectedSchema(1), expectedSchema(2)];
+const schemas = [
+  undefined,
+  expectedSchema(1),
+  expectedSchema(2),
+  expectedSchema(3),
+];
 const joined = `SELECT f.*, i.fingerprint, i.result_json FROM facts f
   JOIN intents i ON i.instance_ref=f.instance_ref AND i.subject_ref=f.subject_ref
     AND i.intent_key=f.intent_key AND i.fact_id=f.id`;
@@ -62,6 +83,9 @@ const joined002 = `SELECT f.*, COALESCE(c.replacement_fingerprint,i.fingerprint)
 const correctionsJoined = `SELECT c.*, i.fingerprint, i.result_json, i.fact_id AS intent_fact_id
   FROM corrections c JOIN intents i ON i.instance_ref=c.instance_ref AND i.subject_ref=c.subject_ref
     AND i.intent_key=c.intent_key AND i.correction_id=c.id`;
+const budgetsJoined = `SELECT b.*, i.fingerprint, i.result_json FROM budgets b
+  JOIN intents i ON i.instance_ref=b.instance_ref AND i.subject_ref=b.subject_ref
+  AND i.intent_key=b.intent_key AND i.budget_id=b.id`;
 
 interface Options {
   readonly busyTimeoutMs?: number;
@@ -70,6 +94,8 @@ interface Options {
   readonly afterFactInsert?: () => void;
   readonly afterCorrectionInsert?: () => void;
   readonly afterMigration?: () => void;
+  readonly afterBudgetInsert?: () => void;
+  readonly afterAlertInsert?: () => void;
 }
 type Row = Record<string, unknown>;
 
@@ -161,6 +187,45 @@ function serializeCorrection(result: ExpenseCorrection): string {
     actorRef: result.actorRef,
   });
 }
+function serializeBudget(result: MonthlyBudget): string {
+  return JSON.stringify({
+    kind: result.kind,
+    id: result.id,
+    categoryId: result.categoryId,
+    month: result.month,
+    amount: result.amount.toJSON(),
+    actorRef: result.actorRef,
+  });
+}
+function rehydrateBudget(row: Row): MonthlyBudget {
+  try {
+    identifier(text(row.instance_ref));
+    identifier(text(row.subject_ref));
+    identifier(text(row.intent_key));
+    const minor = text(row.amount_minor);
+    if (
+      !/^(0|[1-9][0-9]*)$/.test(minor) ||
+      minor.length > SQLITE_LIMITS.maxMinorDigits
+    )
+      throw new StorageError('STORAGE_CORRUPT');
+    const result: MonthlyBudget = Object.freeze({
+      kind: 'budget',
+      id: identifier(text(row.id)),
+      categoryId: identifier(text(row.category_id)),
+      month: calendarMonth(text(row.month)),
+      amount: Money.fromMinor(BigInt(minor), text(row.currency)),
+      actorRef: identifier(text(row.actor_ref)),
+    });
+    if (
+      serializeBudget(result) !== row.result_json ||
+      budgetFingerprint(result) !== row.fingerprint
+    )
+      throw new StorageError('STORAGE_CORRUPT');
+    return result;
+  } catch {
+    throw new StorageError('STORAGE_CORRUPT');
+  }
+}
 function localPath(path: string): string {
   // Composition is trusted and local. Reject SQLite URI/in-memory and network paths.
   if (
@@ -191,7 +256,7 @@ function reserve(path: string): void {
 
 /** Local synthetic adapter. No identity authentication or external connection. */
 export class SqliteExpenseStore
-  implements ExpenseStore, ExpenseCorrectionStore
+  implements ExpenseStore, ExpenseCorrectionStore, MonthlyBudgetStore
 {
   readonly #db: DatabaseSync;
   readonly #options: Options;
@@ -285,9 +350,9 @@ export class SqliteExpenseStore
         this.#db.exec(
           `PRAGMA application_id=${APPLICATION_ID}; PRAGMA user_version=1;`,
         );
-      } else if (version !== 1 && version !== 2)
+      } else if (version !== 1 && version !== 2 && version !== 3)
         throw new StorageError('STORAGE_SCHEMA');
-      this.#version = version === 2 ? 2 : 1;
+      this.#version = version === 3 ? 3 : version === 2 ? 2 : 1;
       // Reject corrupted/foreign v1 before changing its schema or data.
       this.#verify();
       if (this.#version === 1) {
@@ -299,6 +364,18 @@ export class SqliteExpenseStore
           .run(2, checksum002);
         this.#db.exec('PRAGMA user_version=2');
         this.#version = 2;
+        this.#options.afterMigration?.();
+        this.#verify();
+      }
+      if (this.#version === 2) {
+        this.#db.exec(migration003.sql);
+        this.#db
+          .prepare(
+            'INSERT INTO schema_migrations(version,checksum) VALUES(?,?)',
+          )
+          .run(3, checksum003);
+        this.#db.exec('PRAGMA user_version=3');
+        this.#version = 3;
         this.#options.afterMigration?.();
         this.#verify();
       }
@@ -315,7 +392,7 @@ export class SqliteExpenseStore
     if (
       this.#db.prepare('PRAGMA application_id').get()?.application_id !==
         APPLICATION_ID ||
-      ![1, 2].includes(this.#version) ||
+      ![1, 2, 3].includes(this.#version) ||
       this.#db.prepare('PRAGMA user_version').get()?.user_version !==
         this.#version
     )
@@ -334,9 +411,12 @@ export class SqliteExpenseStore
       migrations.length !== this.#version ||
       migrations[0]?.version !== 1 ||
       migrations[0]?.checksum !== checksum ||
-      (this.#version === 2 &&
+      (this.#version >= 2 &&
         (migrations[1]?.version !== 2 ||
-          migrations[1]?.checksum !== checksum002))
+          migrations[1]?.checksum !== checksum002)) ||
+      (this.#version === 3 &&
+        (migrations[2]?.version !== 3 ||
+          migrations[2]?.checksum !== checksum003))
     )
       throw new StorageError('STORAGE_SCHEMA');
     if (
@@ -352,9 +432,17 @@ export class SqliteExpenseStore
     )
       throw new StorageError('STORAGE_CORRUPT');
     for (const row of this.#db.prepare(this.#joined).iterate()) rehydrate(row);
-    if (this.#version === 2)
+    if (this.#version >= 2)
       for (const row of this.#db.prepare(correctionsJoined).iterate())
         this.#rehydrateCorrection(row);
+    if (this.#version === 3) {
+      for (const row of this.#db.prepare(budgetsJoined).iterate())
+        rehydrateBudget(row);
+      for (const row of this.#db
+        .prepare('SELECT * FROM budget_alerts')
+        .iterate())
+        this.#rehydrateAlert(row);
+    }
   }
 
   #run<T>(operation: () => T): T {
@@ -426,6 +514,7 @@ export class SqliteExpenseStore
         if (previous) {
           if (
             previous.kind === 'correction' ||
+            previous.kind === 'budget' ||
             hash(previous) !== fingerprint ||
             previous.kind !== result.kind
           )
@@ -470,6 +559,13 @@ export class SqliteExpenseStore
             fingerprint,
             json,
           );
+        if (result.kind === 'expense')
+          this.#evaluateBudget(
+            scope,
+            result.categoryId,
+            result.occurredOn.slice(0, 7),
+            key,
+          );
         this.#db.exec('COMMIT');
         return Object.freeze(result);
       } catch (error) {
@@ -506,7 +602,15 @@ export class SqliteExpenseStore
   findIntent(scope: Scope, key: string): IntentResult | undefined {
     return this.#run(() =>
       this.#readSnapshot(() => {
-        if (this.#version === 2) {
+        if (this.#version === 3) {
+          const budget = this.#db
+            .prepare(
+              `${budgetsJoined} WHERE b.instance_ref=? AND b.subject_ref=? AND b.intent_key=?`,
+            )
+            .get(scope.instanceRef, scope.subjectRef, key);
+          if (budget) return rehydrateBudget(budget);
+        }
+        if (this.#version >= 2) {
           const correction = this.#db
             .prepare(
               `${correctionsJoined} WHERE c.instance_ref=? AND c.subject_ref=? AND c.intent_key=?`,
@@ -538,7 +642,7 @@ export class SqliteExpenseStore
       const rows = this.#db
         .prepare(
           `${this.#joined} WHERE f.instance_ref=? AND f.subject_ref=? AND f.kind='expense'
-          ${this.#version === 2 ? 'AND NOT EXISTS (SELECT 1 FROM corrections x WHERE x.instance_ref=f.instance_ref AND x.subject_ref=f.subject_ref AND x.original_expense_id=f.id)' : ''}
+          ${this.#version >= 2 ? 'AND NOT EXISTS (SELECT 1 FROM corrections x WHERE x.instance_ref=f.instance_ref AND x.subject_ref=f.subject_ref AND x.original_expense_id=f.id)' : ''}
           ORDER BY f.id LIMIT ?`,
         )
         .all(
@@ -614,7 +718,7 @@ export class SqliteExpenseStore
   ): ExpenseCorrection {
     return this.#run(() => {
       if (this.#options.readOnly) throw new StorageError('STORAGE_READ_ONLY');
-      if (this.#version !== 2) throw new StorageError('STORAGE_SCHEMA');
+      if (this.#version < 2) throw new StorageError('STORAGE_SCHEMA');
       if (this.#writing) throw new StorageError('STORAGE_BUSY');
       identifier(scope.instanceRef);
       identifier(scope.subjectRef);
@@ -676,8 +780,8 @@ export class SqliteExpenseStore
           this.#db.exec('COMMIT');
           return prior;
         }
-        if (!this.#getExpense(scope, originalExpenseId))
-          throw new DomainError('EXPENSE_NOT_FOUND');
+        const original = this.#getExpense(scope, originalExpenseId);
+        if (!original) throw new DomainError('EXPENSE_NOT_FOUND');
         if (
           this.#db
             .prepare(
@@ -742,6 +846,19 @@ export class SqliteExpenseStore
             fingerprint,
             json,
           );
+        this.#evaluateBudget(
+          scope,
+          original.categoryId,
+          original.occurredOn.slice(0, 7),
+          key,
+        );
+        if (replacement)
+          this.#evaluateBudget(
+            scope,
+            replacement.categoryId,
+            replacement.occurredOn.slice(0, 7),
+            key,
+          );
         this.#db.exec('COMMIT');
         return result;
       } catch (error) {
@@ -764,7 +881,7 @@ export class SqliteExpenseStore
         const expense = this.#getExpense(scope, expenseId);
         if (!expense) throw new DomainError('EXPENSE_NOT_FOUND');
         const outgoing =
-          this.#version === 2
+          this.#version >= 2
             ? this.#db
                 .prepare(
                   `${correctionsJoined}
@@ -773,7 +890,7 @@ export class SqliteExpenseStore
                 .get(scope.instanceRef, scope.subjectRef, expenseId)
             : undefined;
         const incoming =
-          this.#version === 2
+          this.#version >= 2
             ? this.#db
                 .prepare(
                   `${correctionsJoined}
@@ -797,6 +914,264 @@ export class SqliteExpenseStore
         throw error;
       }
     });
+  }
+
+  #budget(
+    scope: Scope,
+    categoryId: string,
+    month: string,
+  ): MonthlyBudget | null {
+    if (this.#version < 3) return null;
+    const row = this.#db
+      .prepare(
+        `${budgetsJoined} WHERE b.instance_ref=? AND b.subject_ref=?
+      AND b.category_id=? AND b.month=? ORDER BY b.sequence DESC LIMIT 1`,
+      )
+      .get(scope.instanceRef, scope.subjectRef, categoryId, month);
+    return row ? rehydrateBudget(row) : null;
+  }
+
+  #consumed(scope: Scope, categoryId: string, month: string): Money {
+    const rows = this.#db
+      .prepare(
+        `${this.#joined} WHERE f.instance_ref=? AND f.subject_ref=?
+      AND f.kind='expense' AND f.category_id=? AND substr(f.occurred_on,1,7)=?
+      ${this.#version >= 2 ? 'AND NOT EXISTS (SELECT 1 FROM corrections x WHERE x.instance_ref=f.instance_ref AND x.subject_ref=f.subject_ref AND x.original_expense_id=f.id)' : ''}
+      LIMIT ?`,
+      )
+      .all(
+        scope.instanceRef,
+        scope.subjectRef,
+        categoryId,
+        month,
+        SQLITE_LIMITS.maxQueryRows + 1,
+      );
+    if (rows.length > SQLITE_LIMITS.maxQueryRows)
+      throw new StorageError('STORAGE_LIMIT');
+    let total = 0n;
+    for (const row of rows) total += (rehydrate(row) as Expense).amount.minor;
+    return Money.fromMinor(total);
+  }
+
+  #rehydrateAlert(row: Row): BudgetAlert {
+    try {
+      const scope = {
+        instanceRef: identifier(text(row.instance_ref)),
+        subjectRef: identifier(text(row.subject_ref)),
+      };
+      const categoryId = identifier(text(row.category_id));
+      const month = calendarMonth(text(row.month));
+      const budgetId = identifier(text(row.budget_id));
+      const minor = text(row.consumed_minor);
+      if (
+        !/^[1-9][0-9]*$/.test(minor) ||
+        minor.length > 4101 ||
+        (row.threshold !== 80 && row.threshold !== 100)
+      )
+        throw new StorageError('STORAGE_CORRUPT');
+      const budgetRow = this.#db
+        .prepare(
+          `${budgetsJoined} WHERE b.instance_ref=? AND b.subject_ref=? AND b.id=?`,
+        )
+        .get(scope.instanceRef, scope.subjectRef, budgetId);
+      if (!budgetRow) throw new StorageError('STORAGE_CORRUPT');
+      const budget = rehydrateBudget(budgetRow);
+      const consumed = Money.fromMinor(BigInt(minor));
+      if (
+        budget.categoryId !== categoryId ||
+        budget.month !== month ||
+        budgetThreshold(budget.amount, consumed) !== row.threshold
+      )
+        throw new StorageError('STORAGE_CORRUPT');
+      return Object.freeze({
+        id: identifier(text(row.id)),
+        categoryId,
+        month,
+        threshold: row.threshold,
+        budgetId,
+        consumed,
+        triggerIntentKey: identifier(text(row.trigger_intent_key)),
+      });
+    } catch {
+      throw new StorageError('STORAGE_CORRUPT');
+    }
+  }
+
+  #alerts(
+    scope: Scope,
+    categoryId: string,
+    month: string,
+  ): readonly BudgetAlert[] {
+    if (this.#version < 3) return Object.freeze([]);
+    const rows = this.#db
+      .prepare(
+        `SELECT * FROM budget_alerts WHERE instance_ref=? AND subject_ref=?
+      AND category_id=? AND month=? ORDER BY threshold`,
+      )
+      .all(scope.instanceRef, scope.subjectRef, categoryId, month);
+    return Object.freeze(rows.map((row) => this.#rehydrateAlert(row)));
+  }
+
+  #evaluateBudget(
+    scope: Scope,
+    categoryId: string,
+    month: string,
+    key: string,
+  ): void {
+    const budget = this.#budget(scope, categoryId, month);
+    if (!budget) return;
+    const consumed = this.#consumed(scope, categoryId, month);
+    const threshold = budgetThreshold(budget.amount, consumed);
+    if (threshold === null) return;
+    const alerts = this.#alerts(scope, categoryId, month);
+    if (
+      alerts.some(
+        (alert) => alert.threshold === 100 || alert.threshold === threshold,
+      )
+    )
+      return;
+    this.#db
+      .prepare(
+        `INSERT INTO budget_alerts(instance_ref,subject_ref,id,category_id,month,threshold,budget_id,consumed_minor,trigger_intent_key)
+      VALUES(?,?,?,?,?,?,?,?,?)`,
+      )
+      .run(
+        scope.instanceRef,
+        scope.subjectRef,
+        randomUUID(),
+        categoryId,
+        month,
+        threshold,
+        budget.id,
+        consumed.minor.toString(),
+        key,
+      );
+    this.#options.afterAlertInsert?.();
+  }
+
+  setBudget(
+    scope: Scope,
+    key: string,
+    fingerprint: string,
+    draft: Omit<MonthlyBudget, 'id'>,
+  ): MonthlyBudget {
+    return this.#run(() => {
+      if (this.#options.readOnly) throw new StorageError('STORAGE_READ_ONLY');
+      if (this.#version !== 3) throw new StorageError('STORAGE_SCHEMA');
+      if (this.#writing) throw new StorageError('STORAGE_BUSY');
+      identifier(scope.instanceRef);
+      identifier(scope.subjectRef);
+      identifier(key);
+      const candidate: MonthlyBudget = { ...draft, id: randomUUID() };
+      const json = serializeBudget(candidate);
+      if (
+        candidate.amount.minor.toString().length >
+          SQLITE_LIMITS.maxMinorDigits ||
+        Buffer.byteLength(json) > SQLITE_LIMITS.maxResultBytes
+      )
+        throw new StorageError('STORAGE_LIMIT');
+      const result = rehydrateBudget({
+        instance_ref: scope.instanceRef,
+        subject_ref: scope.subjectRef,
+        intent_key: key,
+        id: candidate.id,
+        category_id: candidate.categoryId,
+        month: candidate.month,
+        amount_minor: candidate.amount.minor.toString(),
+        currency: candidate.amount.currency,
+        actor_ref: candidate.actorRef,
+        fingerprint,
+        result_json: json,
+      });
+      this.#db.exec('BEGIN IMMEDIATE');
+      this.#writing = true;
+      try {
+        const prior = this.findIntent(scope, key);
+        if (prior) {
+          if (
+            prior.kind !== 'budget' ||
+            budgetFingerprint(prior) !== fingerprint
+          )
+            throw new DomainError('IDEMPOTENCY_CONFLICT');
+          this.#db.exec('COMMIT');
+          return prior;
+        }
+        if (!this.getCategory(scope, result.categoryId))
+          throw new DomainError('CATEGORY_NOT_FOUND');
+        this.#db
+          .prepare(
+            `INSERT INTO budgets(instance_ref,subject_ref,id,intent_key,category_id,month,amount_minor,currency,actor_ref)
+          VALUES(?,?,?,?,?,?,?,?,?)`,
+          )
+          .run(
+            scope.instanceRef,
+            scope.subjectRef,
+            result.id,
+            key,
+            result.categoryId,
+            result.month,
+            result.amount.minor.toString(),
+            result.amount.currency,
+            result.actorRef,
+          );
+        this.#options.afterBudgetInsert?.();
+        this.#db
+          .prepare(
+            `INSERT INTO intents(instance_ref,subject_ref,intent_key,budget_id,fingerprint,result_json)
+          VALUES(?,?,?,?,?,?)`,
+          )
+          .run(
+            scope.instanceRef,
+            scope.subjectRef,
+            key,
+            result.id,
+            fingerprint,
+            json,
+          );
+        this.#evaluateBudget(scope, result.categoryId, result.month, key);
+        this.#db.exec('COMMIT');
+        return result;
+      } catch (error) {
+        if (this.#db.isTransaction) this.#db.exec('ROLLBACK');
+        throw error;
+      } finally {
+        this.#writing = false;
+      }
+    });
+  }
+
+  getBudgetStatus(
+    scope: Scope,
+    categoryId: string,
+    month: string,
+  ): BudgetStatus {
+    return this.#run(() =>
+      this.#readSnapshot(() => {
+        identifier(scope.instanceRef);
+        identifier(scope.subjectRef);
+        identifier(categoryId);
+        calendarMonth(month);
+        if (!this.getCategory(scope, categoryId))
+          throw new DomainError('CATEGORY_NOT_FOUND');
+        const budget = this.#budget(scope, categoryId, month);
+        const consumed = this.#consumed(scope, categoryId, month);
+        const percentage =
+          budget && budget.amount.minor !== 0n
+            ? Object.freeze({
+                numerator: consumed.minor * 100n,
+                denominator: budget.amount.minor,
+              })
+            : null;
+        return Object.freeze({
+          month,
+          categoryId,
+          budget,
+          consumed,
+          percentage,
+          alerts: this.#alerts(scope, categoryId, month),
+        });
+      }),
+    );
   }
 
   close(): void {

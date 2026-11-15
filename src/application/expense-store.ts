@@ -1,5 +1,6 @@
 import type { Category, Expense } from '../domain/expenses.ts';
 import type { ExpenseCorrection } from '../domain/expense-corrections.ts';
+import type { MonthlyBudget } from '../domain/monthly-budgets.ts';
 
 /** Supplied by a trusted boundary, never taken from the financial payload. */
 export interface AccessContext {
@@ -8,7 +9,12 @@ export interface AccessContext {
   readonly instanceRef: string;
 }
 export type Action =
-  'category:create' | 'expense:record' | 'expense:read' | 'expense:correct';
+  | 'category:create'
+  | 'expense:record'
+  | 'expense:read'
+  | 'expense:correct'
+  | 'budget:write'
+  | 'budget:read';
 export interface AccessPolicy {
   allows(context: AccessContext, action: Action): boolean;
 }
@@ -16,7 +22,8 @@ export interface Scope {
   readonly subjectRef: string;
   readonly instanceRef: string;
 }
-export type IntentResult = Category | Expense | ExpenseCorrection;
+export type IntentResult =
+  Category | Expense | ExpenseCorrection | MonthlyBudget;
 
 /**
  * Implementations must atomically commit intent fingerprint + immutable fact.

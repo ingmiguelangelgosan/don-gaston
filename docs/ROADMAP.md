@@ -31,9 +31,22 @@ No se inició Fase 2 ni integración externa; la Fase 1 no se declara terminada.
 - Diseño del ledger y migraciones para DB aislada *solo después de ADR*.
 - **Salida:** tests exactitud, redondeo, idempotencia, no doble conteo, autorización de sujeto; sin datos reales ni Jarvis conectado.
 
+### Fase 1D — Presupuestos mensuales (alcance aprobado 2026-11-14)
+
+El usuario adelantó explícitamente el núcleo de presupuestos de Fase 2 a este
+incremento. Implementados límites por categoría/mes, consumo vigente, porcentaje
+exacto y eventos internos 80/100 idempotentes, con migración SQLite v3. Verificados
+**91/91 tests** incluyendo los 64 previos, rollback, concurrencia, reinicios,
+restauración y conservación del historial v2. [Informe](reviews/PHASE1_MONTHLY_BUDGETS.md).
+
+No hay traslado de saldo, copia automática de límites ni mensajes. La revisión
+mensual conversacional requiere definir su orquestación antes de implementarse.
+El resto de los casos financieros de Fase 2 sigue pendiente. Fase 1 permanece abierta.
+
 ## Fase 2 — Casos financieros MVP
 
-- Presupuestos, gastos fijos, deudas, pagos confirmados, salario FIFO, préstamos y suscripciones; incrementos pequeños separados.
+- Orquestación pendiente de revisión mensual de presupuestos; gastos fijos, deudas,
+  pagos confirmados, salario FIFO, préstamos y suscripciones en incrementos separados.
 - **Salida:** pruebas de concurrencia, transacción, reversos, auditoría, permisos, informes de caja/consumo.
 
 ## Fase 3 — Comprobantes, respaldo y privacidad

@@ -1,6 +1,6 @@
 ﻿# Don Gastón — agente financiero independiente
 
-**Estado: correcciones auditables de Fase 1 implementadas y verificadas localmente el 2026-11-14.** Categorías, gastos, anulación/reemplazo y totales vigentes con SQLite aislado e idempotencia durable, exclusivamente con datos sintéticos. Se conserva el adaptador en memoria para el flujo previo. La Fase 1 completa sigue abierta; no existe API ni conexión con Sir Jarvis. Sin commits ni PR en este incremento.
+**Estado: Fase 1D, núcleo de presupuestos mensuales implementado y verificado localmente el 2026-11-14.** Categorías, gastos, correcciones auditables, presupuestos y eventos internos de alerta con SQLite aislado e idempotencia durable, exclusivamente con datos sintéticos. Se conserva el adaptador en memoria para el flujo previo. La Fase 1 completa sigue abierta; no existe API ni conexión con Sir Jarvis. Sin commits ni PR en este incremento.
 
 Don Gastón es propietario de las reglas financieras; Sir Jarvis conserva canales, identidad conversacional, orquestación y confirmaciones. Solo el alcance descrito aquí está implementado; las demás reglas de producto siguen siendo requisitos. La referencia histórica se conserva sin cambios.
 
@@ -128,9 +128,9 @@ clave falla con `EXPENSE_ALREADY_CORRECTED`; misma clave con contenido distinto 
 inválido: `INVALID_CORRECTION`. `findIntent` mantiene las respuestas antiguas y devuelve
 también correcciones nuevas, sin reactivar gastos históricos.
 
-La apertura con escritura migra v1→v2 transaccionalmente; preserva datos y huellas
+La apertura con escritura migra v1/v2→v3 transaccionalmente; preserva datos y huellas
 anteriores. La apertura solo lectura de v1 no migra. Mantener el binario actualizado
-para bases v2: no hay downgrade. El adaptador en memoria conserva sus funcionalidades
+para bases v3: no hay downgrade. El adaptador en memoria conserva sus funcionalidades
 previas y no implementa el puerto de correcciones.
 
 ```powershell
@@ -140,6 +140,52 @@ npm.cmd run check
 
 Las fixtures se conservan en `.cache/correction-tests/`, con bases nuevas por ejecución.
 No se migran archivos externos ni datos reales. [Informe completo](docs/reviews/PHASE1_EXPENSE_CORRECTIONS.md).
+
+## Fase 1D: presupuestos mensuales y eventos internos
+
+`MonthlyBudgetService` recibe el adaptador SQLite y la política de acceso. Las
+fechas del gasto y el mes explícito determinan el periodo, sin usar el reloj para
+inferirlo. Ejemplo dentro de una composición local con contexto sintético autorizado:
+
+```typescript
+const budgets = new MonthlyBudgetService(store, policy);
+budgets.setBudget(context, 'budget-fuel-2026-11', {
+  categoryId: fuel.id,
+  month: '2026-11',
+  amount: '100000.00',
+  currency: 'COP',
+});
+const status = budgets.getBudgetStatus(context, {
+  categoryId: fuel.id,
+  month: '2026-11',
+});
+// status.budget, status.consumed, status.percentage, status.alerts
+```
+
+Importación: `src/application/monthly-budget-service.ts`. Se exige `budget:write`
+para establecer/revisar y `budget:read` para consultar. El porcentaje es una fracción
+exacta `{numerator: bigint, denominator: bigint}`; requiere serialización explícita
+si en el futuro se transporta como JSON. No existe capa de transporte implementada.
+
+Sin presupuesto: `budget=null`. Límite cero: presupuesto presente y porcentaje
+`null`; no alerta con consumo cero y genera solo 100 % al existir consumo positivo.
+No se arrastra saldo ni se crean límites del siguiente mes automáticamente.
+
+Gastos, correcciones y ajustes evalúan consumo vigente en su misma transacción.
+Los eventos de 80/100 se persisten como máximo una vez por categoría/mes; salto
+directo genera solo 100 y suprime un 80 posterior. Se conservan aunque una corrección
+reduzca el consumo. Cada evento vincula presupuesto evaluado, consumo e intención.
+No son mensajes enviados ni crean gastos nuevos.
+
+Una nueva clave añade una revisión del límite; un retry devuelve su revisión
+original sin reactivarla. `findIntent` de presupuestos consulta solo presupuestos;
+los servicios de gastos consultan gastos/categorías/correcciones. Comparten claves,
+por lo que `undefined` en una consulta restringida no significa clave reutilizable.
+
+Pendiente: definir orquestación de la revisión mensual (un mensaje al comenzar el
+mes, últimos importes confirmados si no hay respuesta y ajustes conversacionales).
+No hay scheduler, entrega de eventos ni integración con Jarvis.
+[Informe completo y pruebas](docs/reviews/PHASE1_MONTHLY_BUDGETS.md).
 
 ## Estructura implementada y responsables
 
@@ -164,6 +210,12 @@ En Fase 1 se delegaron revisión de dominio, pruebas y revisión de seguridad, s
 No se crearon carpetas vacías para capas futuras. Las interfaces de red siguen pendientes.
 
 ## Evidencia ejecutada
+
+Presupuestos, 2026-11-14: `npm.cmd run format` y `npm.cmd run check`, salida 0:
+formato, lint sin warnings, typecheck, **91/91 pruebas aprobadas** (64 previas + 27
+nuevas) y build. Se verificaron límites/consumos mayores de 64 bits, umbrales exactos,
+correcciones, concurrencia entre procesos, rollback, reinicio, copias restauradas,
+integridad y migración v2→v3. Evidencia local en `.cache/monthly-budgets-check.log`.
 
 Correcciones, 2026-11-14: `npm.cmd run check`, salida 0: formato, lint, typecheck,
 **64/64 pruebas aprobadas** (46 anteriores + 18 de correcciones) y build. Se probaron
@@ -211,8 +263,8 @@ Versiones consultadas en npm antes de fijarlas: TypeScript 6.0.3, ESLint 10.14.0
 
 - [ADR-001](docs/adr/001-persistence.md) aprobado e implementado para categorías/gastos sintéticos. Antes de un piloto faltan objetivos operativos de respaldo/retención, permisos y recuperación ante fallos físicos.
 - [ADR-002](docs/adr/002-jarvis-contract.md): cotejo contractual y aprobación futura; el borrador no garantiza compatibilidad.
-- Decidir redondeo/residuos, proyección presupuestaria y calendario antes de los módulos correspondientes. Precisiones de la referencia histórica están documentadas en el informe de dominio, sin resolverlas por suposición.
-- Fase 1 tiene gastos y correcciones auditables SQLite implementados; su cierre completo sigue pendiente. Siguiente incremento propuesto: consulta paginada del historial y recorrido de cadenas de corrección, todavía con fixtures y sin ampliar a otros módulos financieros.
+- El núcleo presupuestario usa fracciones exactas y meses civiles explícitos. Redondeo de presentación y orquestación del ciclo mensual siguen pendientes; no se habilita copia automática de límites.
+- Fase 1 tiene gastos, correcciones y núcleo de presupuestos SQLite; su cierre completo sigue pendiente. Siguiente incremento propuesto: consulta paginada de eventos internos con un contrato de entrega/confirmación idempotente, todavía con fixtures y sin conectar canales.
 - Autenticación/autorización operativa, recibos privados, respaldo/restauración de información real, datos reales y despliegue siguen pendientes. La idempotencia y recuperación verificadas aquí son locales con fixtures; no certifican producción.
 - CI usa tags de acciones y la línea Node 24: posible deriva de versiones; no fue ejecutado remotamente. `.gitignore` no es un control de acceso ni garantiza ausencia de secretos.
 
