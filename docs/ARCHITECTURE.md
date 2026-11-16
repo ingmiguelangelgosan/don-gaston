@@ -226,6 +226,48 @@ frente a una reescritura coherente de alguien con control de escritura completo.
 No hay consolidado global de caja, canal, scheduler ni contacto con terceros.
 [Alcance, decisiones y pruebas](reviews/PHASE1_PERSONAL_LOANS.md).
 
+## Suscripciones personales y compartidas — Fase 1K
+
+`SubscriptionService` autoriza/valida, `SubscriptionStore` define el puerto y el
+dominio puro calcula reparto exacto, snapshots y FIFO. `SqliteSubscriptions` usa
+la misma conexión y transacción del almacén; no incorpora servicios ni dependencias.
+
+SQLite v10 añade `subscription_records`, `subscription_intents`,
+`subscription_participants`, `subscription_shares` y `subscription_allocations`.
+Registros tipados e intenciones tienen FK recíprocas, scope completo y secuencia de
+auditoría. Snapshots referencian versiones; participaciones y asignaciones tienen
+FK por instancia/sujeto. Índices únicos protegen periodo, vigencia y pago efectivo;
+triggers conservan append-only y namespace común con los cinco libros previos.
+Las migraciones 001–009 permanecen intactas.
+
+Se reutilizan categorías y las identidades inmutables `loan_counterparties`, sin
+acceso a posiciones de préstamos desde el servicio de suscripciones. La existencia
+de un pendiente se modela por separado de las facturas normales, cuya semántica no
+cambia: el total de una factura normal sigue siendo consumo personal.
+
+El pago de suscripción es el hecho de caja total. Su participación propia positiva
+se proyecta como `Expense` con el mismo ID y un registro técnico en `intents`, como
+en facturas, para reutilizar consumo/presupuestos/alertas. El total y el componente
+no son dos salidas. Si la participación propia es cero, no existe `Expense`.
+La clave técnica aleatoria se crea solo en la transacción nueva; la intención
+externa estable conserva el resultado completo ante respuesta perdida.
+Se bloquea la corrección aislada del componente en aplicación y SQL.
+
+`BEGIN IMMEDIATE` abarca decisión, consumo, reparto, asignaciones, alertas e intención.
+La lectura usa snapshot; reconstruye comandos en orden durable y compara huellas,
+resultados, filas tipadas, snapshots, repartos, asignaciones y gasto vinculado.
+El verificador también opera al abrir/restaurar. Una revisión es un resultado
+persistido sin efecto financiero, no un pago pendiente de ejecución automática.
+
+Límites: 100 externos, 4096 dígitos por importe, 32768 bytes por comando/resultado,
+10000 intenciones y 10000 filas por tabla de vínculos y ámbito; archivo de 64 MiB.
+Se reconstruye el ledger completo, incluido el de préstamos para validar identidades;
+sin paginación ni rendimiento medido al límite. Las huellas detectan inconsistencia,
+no una reescritura coherente de alguien con control total del archivo.
+
+No hay consolidado global de caja, compensación con préstamos, ingreso ganado por
+reembolsos ni notificaciones de cobro. [Informe](reviews/PHASE1_SHARED_SUBSCRIPTIONS.md).
+
 ## Integración con Jarvis: propuesta, no hecho
 
 - HTTPS + JSON versionado, autenticado; red privada o endpoint explícitamente autorizado.

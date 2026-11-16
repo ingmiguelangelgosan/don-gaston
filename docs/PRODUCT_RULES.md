@@ -411,7 +411,71 @@ correcciones de préstamos, edición/fusión de contrapartes ni compensaciones.
 - Cambios de participantes afectan periodos futuros. Reembolsos FIFO por antigüedad; no son ingreso ganado.
 - Sin cobranza automática a terceros ni recordatorios de vencimientos.
 
+### 8.1 Suscripciones mensuales — Fase 1K, 2026-11-16
+
+Implementa §8 de la referencia original con datos sintéticos. La división
+igualitaria permanece intacta; no se permiten cuotas personalizadas.
+
+- `createSubscription` conserva ID estable, nombre, categoría, importe mensual
+  positivo COP, mes inicial, modalidad y participantes explícitos. Las identidades
+  externas reutilizan las contrapartes existentes de préstamos, creadas con
+  `PersonalLoanService.createCounterparty` y permiso `loan:counterparty`. Compartir
+  identidad no comparte ni compensa saldos. Los nombres no son identificadores.
+- Personal exige titular incluido y ningún externo. Compartida exige al menos un
+  externo; `includesHolder` indica explícitamente si participa el titular.
+  No se infiere por el nombre ni por quién paga. Máximo 100 participantes externos.
+- `generateObligation` es explícito, con mes y fecha civil de generación igual o
+  posterior al inicio del mes. Conserva importe, categoría, versión y participantes
+  de ese periodo; no crea caja, consumo ni cuenta por cobrar a participantes.
+  Una obligación por suscripción/mes. No hay generación ni cobro automáticos.
+- `changeParticipants` añade una versión con mes de vigencia posterior a la versión
+  más reciente y a todos los periodos ya generados. Rechaza cambios retroactivos;
+  no modifica snapshots ni deudas anteriores. No cambia precio, categoría o modalidad.
+- `confirmPayment` registra confirmación real ya obtenida por la frontera autorizada.
+  Exige importe total igual al pendiente, fecha no anterior a su generación y
+  referencia. Un solo pago efectivo por obligación. No ejecuta cargos bancarios.
+- Personal: el total es salida de caja y consumo propio. Compartida: se cumple
+  `total = participación propia + suma de cuentas por cobrar externas`. El pago
+  es el único hecho de salida; el gasto vinculado es su componente de consumo,
+  con el mismo ID. No se suman ambas proyecciones como salidas adicionales.
+- El consumo y presupuesto corresponden a la fecha civil del pago, siguiendo la
+  decisión de facturas de Fase 1I. El mes facturado queda separado. Si el titular
+  no participa, consumo cero y ningún gasto ordinario de valor cero.
+- **Decisión aprobada expresamente por el usuario:** solo repartos exactos en
+  centavos. Si el total no es divisible por el número de participantes, se conserva
+  la intención `review_required / NON_DIVISIBLE_AMOUNT`, sin pago efectivo, gasto,
+  alerta ni cuentas por cobrar. No hay redondeo ni distribución de residuos.
+- `receiveReimbursement` registra dinero confirmado recibido de una contraparte,
+  importe, fecha y referencia. FIFO global de suscripciones por persona: primero
+  mes más antiguo; empates por ID de suscripción y obligación. Solo son elegibles
+  participaciones cuyo pago total ya ocurrió a la fecha del reembolso.
+- El reembolso crea una única entrada de caja y asignaciones a mensualidades;
+  no genera ingreso ganado, consumo ni devolución de préstamo. Exceso sobre saldo
+  elegible queda en revisión durable `EXCEEDS_PENDING_BALANCE`, sin efecto parcial.
+- No se reescriben asignaciones confirmadas: un reembolso anterior a otro ya
+  confirmado de esa persona requiere revisión. Un pago total retroactivo también
+  queda `PAYMENT_DATE_REQUIRES_REVIEW` si alteraría el FIFO de reembolsos anteriores.
+  Generar un pendiente antiguo por sí solo no modifica cuentas por cobrar.
+- Reintentos conservan respuesta, actor e instante originales, incluyendo revisiones.
+  Otra clave con el mismo contenido es otra intención. Misma clave con otro contenido
+  produce conflicto. Ante respuesta incierta consultar la misma clave.
+- `getObligation`, `listObligations` y `getReceivables` usan `asOf` explícito y hechos
+  actualmente conocidos; no reconstruyen lo que se conocía en un instante pasado.
+  `monthlyCashFlow` muestra caja y consumo propios de suscripciones, no caja global.
+- Permisos `subscription:write`, `subscription:pay`, `subscription:receive` y
+  `subscription:read`, revalidados antes de replay. Actor, instancia y sujeto se
+  vinculan fuera del payload. La consulta de intenciones filtra resultados del módulo.
+- Pago, componente de consumo, reparto, alertas presupuestarias e intención comparten
+  transacción. Reembolso y asignaciones también. Historial inmutable; se bloquea
+  corregir aisladamente el gasto vinculado hasta definir correcciones conjuntas.
+
+Pendientes: ajustes de precio/categoría, cancelaciones, correcciones de pagos y
+reembolsos, resolución asistida de revisiones y orquestación mensual. Sin mensajes
+a terceros, recordatorios, scheduler ni integración externa.
+[Informe y evidencia](reviews/PHASE1_SHARED_SUBSCRIPTIONS.md).
+
 ## 9. Comprobantes
+
 
 - Opcionales; guardar solo archivos enviados. Imagen sin contexto → borrador y confirmación; ilegible → nunca inventar importe.
 - Almacenamiento privado, vínculo con movimiento, acceso limitado por sujeto. Buscar por fecha, importe, categoría, contraparte y devolver archivo original.

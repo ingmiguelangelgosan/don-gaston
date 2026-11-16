@@ -126,13 +126,31 @@ Pendientes: correcciones auditables de capital, resolución asistida de revision
 y edición/fusión controlada de contrapartes. Sin intereses, recordatorios, mensajes
 a terceros ni consolidado global de caja. La Fase 1 completa sigue abierta.
 
+### Fase 1K — Suscripciones personales y compartidas (2026-11-16)
+
+Implementadas suscripciones estables, pendientes mensuales, snapshots de participantes
+y cambios de vigencia futura. Pago total confirmado con una salida de caja,
+consumo propio separado y cuentas por cobrar externas; reembolsos FIFO por persona,
+sin ingreso ganado ni compensación con préstamos. Decisión aprobada: solo reparto
+exacto; centavos indivisibles quedan en revisión sin pago efectivo. SQLite v10 aditiva.
+
+**321/321 pruebas**: 280 anteriores + 41 nuevas. Formato, lint, typecheck y build
+aprobados. Casos personales/compartidos, importes superiores a 64 bits, cuatro
+carreras entre procesos, rollback, reinicio, restauración, corrupción sintética
+y migración desde v9 conservando la historia verificados.
+[Informe](reviews/PHASE1_SHARED_SUBSCRIPTIONS.md).
+
+Pendientes: ajustes de precio/categoría, cancelaciones, correcciones conjuntas de
+pagos y reembolsos, resolución explícita de revisiones y orquestación mensual.
+Sin flujo de caja global, cobranza, scheduler ni integración. La Fase 1 sigue abierta.
+
 ## Fase 2 — Casos financieros MVP
 
 - Orquestación pendiente de revisión mensual de presupuestos y generación de
   facturas (núcleo adelantado a 1I); ampliaciones de gastos fijos, deudas,
   pagos confirmados, ampliaciones salariales (núcleo FIFO adelantado a 1H), ampliaciones
   de préstamos (núcleo adelantado a 1J)
-  y suscripciones en incrementos separados.
+  y ampliaciones de suscripciones (núcleo adelantado a 1K) en incrementos separados.
 - **Salida:** pruebas de concurrencia, transacción, reversos, auditoría, permisos, informes de caja/consumo.
 
 ## Fase 3 — Comprobantes, respaldo y privacidad

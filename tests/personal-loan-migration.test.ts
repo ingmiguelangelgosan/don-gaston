@@ -267,7 +267,7 @@ test('loans migration: v8 complete history, salary and bill links survive rollba
   const migrated = new SqliteExpenseStore(path);
   try {
     const db = new DatabaseSync(path, { readOnly: true });
-    assert.equal(db.prepare('PRAGMA user_version').get()?.user_version, 9);
+    assert.equal(db.prepare('PRAGMA user_version').get()?.user_version, 10);
     assert.deepEqual(snapshot(db), before);
     db.close();
     assert.deepEqual(

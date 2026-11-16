@@ -1,8 +1,58 @@
 ﻿# Don Gastón — agente financiero independiente
 
-**Estado: Fase 1J, préstamos entre personas implementados y verificados localmente el 2026-11-16.** Contrapartes estables, desembolsos y abonos, saldos separados por dirección y caja de capital sin duplicar consumo o ingresos ganados; SQLite v9 aislado. **280 pruebas aprobadas.** Exclusivamente datos sintéticos. Se conservan los módulos previos y el adaptador en memoria. La Fase 1 completa sigue abierta; sin API ni conexión con Sir Jarvis. Sin commits ni PR en este incremento.
+**Estado: Fase 1K, suscripciones personales y compartidas implementadas y verificadas localmente el 2026-11-16.** Obligaciones mensuales, pagos confirmados, reparto exacto, consumo propio y reembolsos FIFO; SQLite v10 aislado. **321 pruebas aprobadas.** Exclusivamente datos sintéticos. Se conservan los módulos previos y el adaptador en memoria. La Fase 1 completa sigue abierta; sin API ni conexión con Sir Jarvis. Sin commits ni PR en este incremento.
 
 Don Gastón es propietario de las reglas financieras; Sir Jarvis conserva canales, identidad conversacional, orquestación y confirmaciones. Solo el alcance descrito aquí está implementado; las demás reglas de producto siguen siendo requisitos. La referencia histórica se conserva sin cambios.
+
+## Suscripciones personales y compartidas
+
+`SubscriptionService` permite crear suscripciones, generar pendientes mensuales,
+versionar participantes para meses futuros, confirmar el pago total y recibir
+reembolsos parciales/completos. Los participantes reutilizan IDs de contrapartes
+de `PersonalLoanService`, sin mezclar sus cuentas por cobrar con préstamos.
+
+Ejemplo en una composición sintética con `store`, `policy`, `context`, categoría
+y dos contrapartes ya creados:
+
+```typescript
+import { SubscriptionService } from './src/application/subscription-service.ts';
+const subscriptions = new SubscriptionService(store, policy);
+const subscription = subscriptions.createSubscription(context, 'sharing-create', {
+  name: 'Suscripción ficticia', categoryId: category.id, mode: 'shared',
+  monthlyAmount: '45000', effectiveMonth: '2026-11',
+  includesHolder: true, counterpartyIds: [juan.id, ana.id],
+});
+const obligation = subscriptions.generateObligation(context, 'sharing-november', {
+  subscriptionId: subscription.id, month: '2026-11', generatedOn: '2026-11-01',
+});
+subscriptions.confirmPayment(context, 'sharing-paid', {
+  obligationId: obligation.id, amount: '45000', paidOn: '2026-11-05',
+  reference: 'Pago ficticio confirmado',
+});
+subscriptions.receiveReimbursement(context, 'juan-partial', {
+  counterpartyId: juan.id, amount: '10000', receivedOn: '2026-11-06',
+  reference: 'Reembolso ficticio confirmado',
+});
+subscriptions.getReceivables(context, { counterpartyId: juan.id, asOf: '2026-11-30' });
+subscriptions.monthlyCashFlow(context, { month: '2026-11' });
+```
+
+Resultado: salida de **45.000 COP**, consumo/presupuesto propio de **15.000 COP**,
+Juan pendiente **5.000 COP**, Ana **15.000 COP**, entrada de reembolso **10.000 COP**.
+Un segundo reembolso de Juan por 5.000 salda su participación, sin ingreso ganado.
+Personal de 30.000 produce caja y consumo de 30.000 sin cuentas por cobrar externas.
+
+Solo se aceptan repartos exactos en centavos: importes indivisibles quedan en
+revisión durable sin pago efectivo. Reembolsos excedentes o fechas que alterarían
+asignaciones anteriores también requieren revisión. Se conservan snapshots e IDs
+entre reinicios; los reintentos usan la misma clave. `findIntent` recupera el resultado.
+
+Permisos: `subscription:write`, `subscription:pay`, `subscription:receive` y
+`subscription:read`; alta de contraparte existente con `loan:counterparty`.
+Consumo por fecha de pago; mes facturado separado. La caja mostrada pertenece solo
+a suscripciones: no hay consolidado global ni compensación automática con préstamos.
+Sin cambios de precio, cancelaciones, correcciones conjuntas, scheduler o mensajes.
+[Informe, archivos y verificaciones](docs/reviews/PHASE1_SHARED_SUBSCRIPTIONS.md).
 
 ## Ejecutar localmente
 

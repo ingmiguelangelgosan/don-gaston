@@ -1,3 +1,4 @@
+import type { SubscriptionResult } from '../domain/subscriptions.ts';
 import type { LoanResult } from '../domain/personal-loans.ts';
 import type { BillResult } from '../domain/recurring-bills.ts';
 import type { Category, Expense } from '../domain/expenses.ts';
@@ -43,7 +44,11 @@ export type Action =
   | 'loan:counterparty'
   | 'loan:disburse'
   | 'loan:repay'
-  | 'loan:read';
+  | 'loan:read'
+  | 'subscription:write'
+  | 'subscription:pay'
+  | 'subscription:receive'
+  | 'subscription:read';
 export interface AccessPolicy {
   allows(context: AccessContext, action: Action): boolean;
 }
@@ -63,7 +68,8 @@ export type IntentResult =
   | SalaryPeriod
   | SalaryReceipt
   | BillResult
-  | LoanResult;
+  | LoanResult
+  | SubscriptionResult;
 
 /**
  * Implementations must atomically commit intent fingerprint + immutable fact.
