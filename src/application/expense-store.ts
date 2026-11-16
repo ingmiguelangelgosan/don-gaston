@@ -3,6 +3,11 @@ import type { ExpenseCorrection } from '../domain/expense-corrections.ts';
 import type { MonthlyBudget } from '../domain/monthly-budgets.ts';
 import type { DebtPaymentCorrection } from '../domain/debt-payment-corrections.ts';
 import type {
+  SalaryVersion,
+  SalaryPeriod,
+  SalaryReceipt,
+} from '../domain/salary-receivables.ts';
+import type {
   FinancedDebt,
   DebtPaymentResult,
 } from '../domain/financed-debts.ts';
@@ -25,7 +30,11 @@ export type Action =
   | 'debt:write'
   | 'debt:pay'
   | 'debt:read'
-  | 'debt:correct';
+  | 'debt:correct'
+  | 'salary:configure'
+  | 'salary:close'
+  | 'salary:receive'
+  | 'salary:read';
 export interface AccessPolicy {
   allows(context: AccessContext, action: Action): boolean;
 }
@@ -40,7 +49,10 @@ export type IntentResult =
   | MonthlyBudget
   | FinancedDebt
   | DebtPaymentResult
-  | DebtPaymentCorrection;
+  | DebtPaymentCorrection
+  | SalaryVersion
+  | SalaryPeriod
+  | SalaryReceipt;
 
 /**
  * Implementations must atomically commit intent fingerprint + immutable fact.

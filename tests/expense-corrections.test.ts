@@ -1191,7 +1191,7 @@ test('migración v1 a v2 conserva hechos, huellas, claves y resultados originale
     try {
       assert.equal(
         inspect.prepare('PRAGMA user_version').get()?.user_version,
-        6,
+        7,
       );
       assert.deepEqual(
         inspect.prepare('SELECT * FROM facts ORDER BY id').all(),

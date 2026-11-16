@@ -82,10 +82,25 @@ nuevos, con concurrencia, rollback, restauración y migración desde v5.
 Pendientes: resolución asistida de revisiones, conciliación explícita y amortización
 informada. No se habilita operación real ni se declara completa la Fase 1.
 
+### Fase 1H — Ingresos salariales y pendientes (2026-11-15)
+
+Por autorización explícita se adelanta el núcleo salarial: salario neto versionado
+con vigencias al inicio de mes, apertura por periodos, cierre mensual explícito,
+abonos FIFO y consultas de devengado/recibido/pendiente/vencido. SQLite v7 aditiva,
+una entrada de caja por abono confirmado y respuesta breve sin saldo espontáneo.
+**208/208 pruebas**: 170 anteriores + 38 nuevas; formato, lint, typecheck y build
+aprobados. Migración v6, rollback, reinicio, restauración, integridad y concurrencia
+entre procesos verificados. [Informe](reviews/PHASE1_SALARY_RECEIVABLES.md).
+
+Pendientes: correcciones auditables de recibos y asignaciones salariales, resolución
+de excedentes/registro retroactivo, prorrateo y múltiples empleadores. No hay
+cierre automático, recordatorios ni integración externa. La Fase 1 sigue abierta.
+
 ## Fase 2 — Casos financieros MVP
 
 - Orquestación pendiente de revisión mensual de presupuestos; gastos fijos, deudas,
-  pagos confirmados, salario FIFO, préstamos y suscripciones en incrementos separados.
+  pagos confirmados, ampliaciones salariales (núcleo FIFO adelantado a 1H), préstamos
+  y suscripciones en incrementos separados.
 - **Salida:** pruebas de concurrencia, transacción, reversos, auditoría, permisos, informes de caja/consumo.
 
 ## Fase 3 — Comprobantes, respaldo y privacidad

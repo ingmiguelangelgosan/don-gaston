@@ -120,6 +120,40 @@ decisiones que eran válidas entonces; no reinterpreta una revisión antigua con
 saldo actual. Las fechas civiles determinan caja por mes, no ese orden de auditoría.
 Ver [Fase 1G](reviews/PHASE1_DEBT_PAYMENT_CORRECTIONS.md).
 
+## Salario y cartera del empleador — Fase 1H
+
+`SalaryService` autoriza por acción y ámbito, valida entradas y genera huellas;
+`SalaryStore` define el puerto. El dominio puro decide vigencias, cierre, apertura,
+FIFO y proyecciones con `bigint`. `SqliteSalaryReceivables` opera sobre la misma
+conexión aislada de `SqliteExpenseStore`, sin rediseñar los módulos previos.
+
+La migración aditiva v7 conserva v1–v6 y añade `salary_versions`, `salary_periods`,
+`salary_payments`, `salary_allocations` y `salary_intents`. Las intenciones guardan
+comando canónico, respuesta original y secuencia durable; las FK recíprocas unen
+cada hecho a su intención y todas las referencias incluyen instancia/sujeto.
+Triggers impiden edición/borrado y colisiones de claves con gastos y deudas.
+
+`BEGIN IMMEDIATE` abarca lectura de saldos, decisión, hecho, asignaciones e intención.
+Una revisión se persiste sin efecto de caja. Consultas usan snapshot; apertura y
+lecturas reconstruyen las decisiones en secuencia de registro y comparan importes,
+FIFO, vínculos y resultado almacenado. El cierre conserva su versión original y
+no se vuelve a calcular con una configuración posterior. Copias restauradas usan
+el mismo verificador. La huella detecta inconsistencia; no es una firma contra un
+atacante con acceso de escritura completo al archivo.
+
+Los importes positivos se almacenan como texto canónico, sin sumas SQL. Moneda COP
+explícita en comandos/resultados. Límites: 4096 dígitos por importe en unidades
+menores, 32768 bytes por comando/resultado, 10000 intenciones y 10000 asignaciones
+salariales por ámbito; archivo 64 MiB y espera de bloqueo 0–5000 ms. Agregados exactos
+pueden exceder el tamaño de un importe individual. La reconstrucción completa es
+síncrona y puede tener coste cuadrático; no se midió rendimiento al límite y no
+se ofrece paginación salarial. Se prioriza el pequeño ledger personal sintético.
+
+La caja salarial es proyección de recibos confirmados; devengos y aperturas son
+obligaciones, no efectivo disponible. La fecha financiera es civil y explícita;
+el reloj solo registra auditoría. Sin nuevos eventos, notificaciones ni transporte.
+[Alcance, pruebas y límites](reviews/PHASE1_SALARY_RECEIVABLES.md).
+
 ## Integración con Jarvis: propuesta, no hecho
 
 - HTTPS + JSON versionado, autenticado; red privada o endpoint explícitamente autorizado.

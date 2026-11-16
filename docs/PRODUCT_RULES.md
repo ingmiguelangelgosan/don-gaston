@@ -217,6 +217,68 @@ se incorporan mediante el incremento siguiente.
 - Abonos recibidos parciales se aplican FIFO al mes salarial más antiguo; excedentes requieren confirmación.
 - Respuesta al abono breve, sin anunciar espontáneamente saldos; consultas a demanda.
 
+### 6.1 Núcleo salarial — Fase 1H, 2026-11-15
+
+Implementa el alcance salarial de la referencia original §6 con datos sintéticos.
+La decisión explícita del usuario limita las vigencias al primer día del mes;
+no se calcula prorrateo ni se reconstruye todo el historial laboral.
+
+- `configureSalary`: salario neto mensual COP positivo y vencimiento habitual de
+  1 a 31, por defecto 5. Cada vigencia es inmutable y única por ámbito/fecha.
+  Los cierres conservan importe, vencimiento y versión aplicada. Se rechaza una
+  nueva vigencia en o antes de un mes ya cerrado; ajustar periodos históricos
+  requerirá un futuro flujo auditable, nunca una edición silenciosa.
+- `importPendingPeriod`: registra individualmente un saldo pendiente reportado por
+  mes, importe, fecha civil de corte (`asOf`) y día de vencimiento. No presupone
+  que ese importe sea todo lo devengado ni inventa pagos anteriores. La apertura
+  no genera caja. No existe importación masiva ni límite arbitrario de antigüedad;
+  la selección de periodos recientes es explícita durante onboarding.
+- `closePeriod`: exige cierre explícito con `month` y `closedOn` igual/posterior al
+  último día del mes. Toma la última vigencia aplicable al inicio de ese mes y
+  crea una obligación por cobrar. No genera caja. Un solo periodo por mes/ámbito,
+  sea apertura o cierre; misma intención devuelve el original y otra clave para
+  ese mes produce `SALARY_PERIOD_EXISTS`.
+- La obligación cerrada corresponde al último día del mes trabajado, aunque el
+  cierre se registre después. Una apertura reportada está disponible desde su
+  fecha de corte, sin extrapolar su saldo a fechas anteriores. El vencimiento
+  siempre cae en el mes siguiente al trabajado; los días 29–31 se ajustan al
+  último día de ese mes cuando no existan. El día límite es inclusivo: el saldo
+  pendiente se clasifica vencido desde el día siguiente.
+- `receivePayment` registra dinero **ya recibido y confirmado**, con fecha civil,
+  importe positivo, referencia y clave estable. Distribuye automáticamente FIFO
+  entre los periodos elegibles pendientes; puede cubrir varios meses. El recibo
+  confirmado es el único hecho de entrada de caja. Las asignaciones son vínculos
+  contables, no ingresos adicionales ni gastos/consumo/eventos presupuestarios.
+- Si supera lo pendiente elegible, persiste `review_required` con motivo
+  `EXCEEDS_PENDING_BALANCE`, sin aplicar siquiera una parte ni crear caja. Resolver
+  el excedente sigue pendiente; no se promueve un intento en revisión al cambiar
+  los saldos. Reintentar conserva la decisión original.
+- Límite conservador inicial: un abono anterior al último abono confirmado queda
+  en revisión `PAYMENT_DATE_REQUIRES_REVIEW`. Importar/cerrar un mes igual o anterior
+  al último periodo ya asignado exige revisión (`SALARY_PERIOD_REQUIRES_REVIEW`),
+  sin consumir la intención. Esto evita reinterpretar FIFO histórico; el flujo de
+  revisión/corrección retroactiva no está implementado. Cargar los pendientes de
+  apertura antes de registrar sus abonos. Abonos del mismo día se ordenan por registro.
+- `getReceivables({asOf})` separa devengado por cierres (`closedEarned`), pendientes
+  reportados en apertura (`openingReceivable`), recibido, pendiente y vencido.
+  La consulta usa fecha civil explícita y hechos actualmente conocidos; no simula
+  qué información conocía la aplicación en un instante histórico de auditoría.
+  `getPayment` revela asignaciones a demanda; `monthlyCashInflow` muestra solo
+  entradas salariales confirmadas, no es un flujo global de caja.
+- La respuesta al abono contiene únicamente el recibo/estado, sin saldos pendientes
+  ni asignaciones espontáneas. Conserva actor e instante UTC de auditoría; estos
+  no determinan el mes financiero. Referencia textual no es un identificador
+  bancario único: el consumidor debe conservar la misma clave ante incertidumbre.
+- Permisos `salary:configure`, `salary:close` (también apertura), `salary:receive`
+  y `salary:read`, con actor/sujeto/instancia vinculados fuera del payload. Replay
+  revalida autorización y conserva el actor original, incluso si otro actor del
+  mismo ámbito está autorizado. Claves compartidas con todas las mutaciones previas.
+
+Un único flujo salarial lógico por sujeto/instancia; no se captura identidad real
+ni se soportan varios empleadores. Sin scheduler, recordatorios, ingresos
+extraordinarios, conciliación bancaria o correcciones de recibos salariales.
+[Implementación y evidencia](reviews/PHASE1_SALARY_RECEIVABLES.md).
+
 ## 7. Préstamos personales
 
 - Registrar dinero prestado a terceros y dinero recibido en préstamo con contraparte libre; agregar saldos por dirección.

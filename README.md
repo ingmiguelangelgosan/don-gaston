@@ -1,6 +1,6 @@
 ﻿# Don Gastón — agente financiero independiente
 
-**Estado: Fase 1G, correcciones auditables de pagos implementadas y verificadas localmente el 2026-11-15.** Anulación/reemplazo, historial y proyecciones vigentes de saldo estimado, cuotas y caja, sobre los módulos previos en SQLite aislado. Exclusivamente datos sintéticos. Se conserva el adaptador en memoria para el flujo previo. La Fase 1 completa sigue abierta; no existe API ni conexión con Sir Jarvis. Sin commits ni PR en este incremento.
+**Estado: Fase 1H, salario neto y cartera del empleador implementados y verificados localmente el 2026-11-15.** Vigencias mensuales, pendientes de apertura, cierre explícito y abonos FIFO con una entrada de caja por pago confirmado; SQLite v7 aislado. **208 pruebas aprobadas.** Exclusivamente datos sintéticos. Se conservan los módulos previos y el adaptador en memoria. La Fase 1 completa sigue abierta; sin API ni conexión con Sir Jarvis. Sin commits ni PR en este incremento.
 
 Don Gastón es propietario de las reglas financieras; Sir Jarvis conserva canales, identidad conversacional, orquestación y confirmaciones. Solo el alcance descrito aquí está implementado; las demás reglas de producto siguen siendo requisitos. La referencia histórica se conserva sin cambios.
 
@@ -405,12 +405,45 @@ Los cuatro tests cubren defaults/configuración explícita, rechazo de valores i
 
 Versiones consultadas en npm antes de fijarlas: TypeScript 6.0.3, ESLint 10.14.0, typescript-eslint 8.72.1, Prettier 3.9.10 y @types/node 24.19.2. TypeScript 7.0.2 estaba publicado, pero fuera del rango soportado por typescript-eslint (<6.1.0); se eligió la versión compatible. La primera consulta falló por permisos de la caché global y se resolvió usando `.cache/npm`, sin elevar permisos.
 
+## Salarios — Fase 1H
+
+`SalaryService` permite `configureSalary`, `importPendingPeriod`, `closePeriod` y
+`receivePayment`, con contexto autorizado y clave de intención por mutación.
+`getReceivables({asOf})`, `getPayment(id)` y `monthlyCashInflow({month})` son consultas
+explícitas. No se crea ingreso disponible al cerrar un mes ni al cargar pendientes.
+
+Fixture reproducible en `tests/salary-receivables.test.ts`: salario neto
+`"3000000"`, septiembre y octubre pendientes por `"3000000"` cada uno y abono
+`"800000"` el `2026-11-15`. Resultado: una entrada de caja de $800.000 COP,
+septiembre $2.200.000, octubre $3.000.000 y total pendiente $5.200.000. La respuesta
+al registrar el abono no anuncia ese saldo; se obtiene por consulta posterior.
+Reintentar conserva recibo y asignaciones originales.
+
+Vigencias desde el día 1, sin prorrateo; vencimiento habitual día 5 siguiente,
+vencido desde el 6 usando fecha de consulta explícita. Abonos excedentes quedan
+registrados para revisión sin asignaciones/caja. Importar periodos antiguos después
+de pagos o registrar abonos retroactivos tiene límites conservadores documentados.
+No hay correcciones salariales, varios empleadores, scheduler ni recordatorios.
+
+SQLite v7 añade tablas salariales sin reescribir el historial v1–v6; importes
+textuales canónicos y cálculos `bigint`. Commit conjunto de recibo/asignaciones/
+intención, snapshot de lectura y verificación de FIFO al reabrir. Sin dependencias
+nuevas ni integraciones externas. [Informe](docs/reviews/PHASE1_SALARY_RECEIVABLES.md)
+y [reglas](docs/PRODUCT_RULES.md).
+
+Verificado el 2026-11-15: `npm.cmd run format` y `npm.cmd run check`, salida 0:
+formato, lint, typecheck, **208/208 pruebas** (170 previas + 38 nuevas) y build.
+Logs locales ignorados: `.cache/salary-receivables-format.log` y
+`.cache/salary-receivables-check.log`. Las pruebas cubren FIFO, exceso, fechas,
+importes mayores de 64 bits, reinicio, restauración, concurrencia, rollback,
+migración e integridad.
+
 ## Pendientes y siguiente fase
 
 - [ADR-001](docs/adr/001-persistence.md) aprobado e implementado para categorías/gastos sintéticos. Antes de un piloto faltan objetivos operativos de respaldo/retención, permisos y recuperación ante fallos físicos.
 - [ADR-002](docs/adr/002-jarvis-contract.md): cotejo contractual y aprobación futura; el borrador no garantiza compatibilidad.
 - El núcleo presupuestario usa fracciones exactas y meses civiles explícitos. Redondeo de presentación y orquestación del ciclo mensual siguen pendientes; no se habilita copia automática de límites.
-- Fase 1 incluye correcciones auditables de pagos; su cierre completo sigue pendiente. Siguiente incremento recomendado: diseñar la resolución explícita de revisiones y conciliación de saldos reportados, con fixtures y sin integrar bancos.
+- Fase 1 incluye el núcleo salarial FIFO; su cierre completo sigue pendiente. Siguiente incremento recomendado: definir correcciones auditables de abonos y reasignaciones salariales, con revisión de excedentes y fechas retroactivas, usando fixtures sin bancos.
 - Autenticación/autorización operativa, recibos privados, respaldo/restauración de información real, datos reales y despliegue siguen pendientes. La idempotencia y recuperación verificadas aquí son locales con fixtures; no certifican producción.
 - CI usa tags de acciones y la línea Node 24: posible deriva de versiones; no fue ejecutado remotamente. `.gitignore` no es un control de acceso ni garantiza ausencia de secretos.
 
