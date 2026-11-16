@@ -169,7 +169,7 @@ test('debt correction migration: v5 payment identities, decisions and intent byt
   try {
     const db = new DatabaseSync(path, { readOnly: true });
     try {
-      assert.equal(db.prepare('PRAGMA user_version').get()?.user_version, 8);
+      assert.equal(db.prepare('PRAGMA user_version').get()?.user_version, 9);
       assert.deepEqual(snapshot(db), original);
     } finally {
       db.close();

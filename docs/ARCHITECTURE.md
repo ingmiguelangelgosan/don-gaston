@@ -194,6 +194,38 @@ La futura generación mensual requiere orquestación explícita, calendario y cl
 estables fuera del dominio. No hay scheduler, servicio nuevo ni integración Jarvis.
 [Decisiones, orquestación pendiente y evidencia](reviews/PHASE1_RECURRING_BILLS.md).
 
+## Préstamos personales — Fase 1J
+
+`PersonalLoanService` autoriza cada operación y valida entradas; `PersonalLoanStore`
+define el puerto. El dominio decide desembolsos/abonos, orientación de caja y
+saldos por contraparte/dirección usando `bigint`. `SqlitePersonalLoans` comparte
+la conexión aislada existente, con tablas propias de capital. No escribe en
+`facts`, presupuestos, alertas, salarios ni las proyecciones de otros módulos.
+
+SQLite v9 añade `loan_counterparties`, `loan_movements` y `loan_intents`; conserva
+001–008 sin reescribirlas. FK recíprocas por instancia/sujeto vinculan movimiento
+e intención. Restricciones verifican dirección/estado/orientación de caja, y
+triggers prohíben edición/borrado y colisiones de claves con los cuatro namespaces
+previos. Nombres de contraparte no son únicos; los ID sí son estables y aislados.
+
+`BEGIN IMMEDIATE` abarca lectura del capital, decisión, movimiento e intención.
+La decisión revisa el saldo agregado y los prefijos cronológicos de confirmados
+antes de aceptar un abono retroactivo. Una revisión se persiste sin efecto de caja.
+Consultas usan snapshot; la rehidratación reproduce decisiones en orden de registro
+y compara comando, huella, filas y resultado original. No reevalúa revisiones
+anteriores con capital registrado posteriormente. Restauraciones usan el verificador.
+
+Un movimiento confirmado es un único hecho con proyección de capital y caja.
+Se conservan importes textuales COP, sin sumas SQL monetarias. Límites: 4096 dígitos
+por importe, 32768 bytes por comando/resultado, 10000 intenciones de préstamos por
+ámbito y 64 MiB por archivo. El saldo agregado puede tener más dígitos que un
+importe individual. Reconstrucción completa síncrona con ordenamientos repetidos;
+sin paginación ni rendimiento medido al límite. La huella no autentica el archivo
+frente a una reescritura coherente de alguien con control de escritura completo.
+
+No hay consolidado global de caja, canal, scheduler ni contacto con terceros.
+[Alcance, decisiones y pruebas](reviews/PHASE1_PERSONAL_LOANS.md).
+
 ## Integración con Jarvis: propuesta, no hecho
 
 - HTTPS + JSON versionado, autenticado; red privada o endpoint explícitamente autorizado.

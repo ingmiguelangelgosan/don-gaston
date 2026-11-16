@@ -351,6 +351,59 @@ extraordinarios, conciliación bancaria o correcciones de recibos salariales.
 - Conservar desembolsos y abonos individuales. Capital recibido/prestado no se considera ingreso ganado/gasto de consumo; distinguir caja y activo/pasivo.
 - Pagos parciales/total, nunca duplicar ni inferir persona o dirección.
 
+### 7.1 Préstamos entre personas — Fase 1J, 2026-11-16
+
+Implementa el alcance de la referencia original §7 con fixtures sintéticas.
+
+- `createCounterparty` registra nombre e ID estable. El nombre no es una clave
+  única: dos personas con igual nombre mantienen identidades y saldos distintos.
+  No se codifican parentescos ni nombres específicos en las reglas.
+- Dirección obligatoria: `receivable` («me deben») y `payable` («le debo»).
+  Cada contraparte mantiene ambas posiciones independientes; nunca se compensan.
+- `recordDisbursement` registra capital efectivamente prestado/recibido, con fecha
+  civil, importe positivo COP y referencia. Admite varios desembolsos por persona
+  y dirección, conservando cada movimiento. No crea gasto, salario ni alerta.
+- `recordRepayment` registra devolución confirmada parcial o total de capital.
+  Se aplica al saldo agregado de esa persona/dirección; no se inventa una
+  asignación a desembolsos individuales, calendario, interés o comisión.
+- Efectos de caja: recibir préstamo aumenta pasivo y entrada; prestar aumenta
+  cuenta por cobrar y salida; recibir devolución reduce cuenta por cobrar y
+  genera entrada; devolver reduce pasivo y genera salida. Ninguno es ingreso
+  ganado ni consumo. Cada movimiento confirmado es el único hecho de caja.
+- Un abono superior al pendiente produce `review_required` con motivo
+  `EXCEEDS_PENDING_BALANCE`, sin efecto de caja ni reducción parcial del saldo.
+  El resultado de revisión es durable e idempotente. No se reactiva al registrar
+  después más capital; resolverlo requiere revisión explícita y otra intención.
+- Para abonos retroactivos se comprueba que el saldo no sea negativo en ningún
+  punto de la historia civil de esa contraparte/dirección, incluidos los pagos
+  posteriores. Se desempata por orden durable de registro en el mismo día.
+  Un abono que cabe en el saldo total pero rompe esa condición queda en revisión
+  `PAYMENT_DATE_REQUIRES_REVIEW`. Un desembolso retroactivo puede registrarse
+  porque solo agrega capital; no modifica decisiones anteriores.
+- `principalBalanceAfter` conserva el saldo total de capital conocido al decidir
+  el movimiento, no un saldo bancario verificado ni necesariamente el saldo a su
+  fecha retroactiva. `getPosition({counterpartyId,direction,asOf})` calcula el saldo
+  a una fecha civil explícita, sumando únicamente confirmados elegibles. Conserva
+  también intentos en revisión en el historial, identificados sin efecto financiero.
+- `listPositions({asOf})` presenta saldos por persona y totales por dirección,
+  sin netear. Incluye las contrapartes conocidas aunque aún no tengan movimientos
+  elegibles. `monthlyCashFlow({month})` presenta entradas y salidas de préstamos
+  confirmadas, usando los mismos IDs; no es un consolidado global de caja.
+- Consultas a fecha usan hechos actualmente conocidos; no reconstruyen lo que
+  la aplicación conocía en un instante de auditoría. `recordedAt` conserva instante
+  UTC de registro; `occurredOn` determina la fecha financiera, sin reloj implícito.
+- Permisos `loan:counterparty`, `loan:disburse`, `loan:repay` y `loan:read`, con
+  actor/sujeto/instancia vinculados fuera del payload. Autorización previa a toda
+  lectura y replay. La clave comparte namespace financiero con los otros módulos;
+  mismo contenido devuelve el resultado original, distinto contenido es conflicto.
+- El libro, las contrapartes, las revisiones y sus intenciones son inmutables.
+  Referencia textual no es ID bancario único: otra clave representa otra intención,
+  aunque los datos coincidan. Ante respuesta incierta se consulta la misma clave.
+
+Sin intereses, vencimientos inferidos, recordatorios, mensajes a terceros,
+correcciones de préstamos, edición/fusión de contrapartes ni compensaciones.
+[Informe, contrato y evidencia](reviews/PHASE1_PERSONAL_LOANS.md).
+
 ## 8. Suscripciones compartidas
 
 - Toda suscripción mensual crea pendiente; solo confirmar pago real.

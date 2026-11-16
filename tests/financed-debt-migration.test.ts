@@ -193,7 +193,7 @@ test('financed debt migration: v4 history, cursor and acknowledgements survive v
   try {
     const db = new DatabaseSync(path, { readOnly: true });
     try {
-      assert.equal(db.prepare('PRAGMA user_version').get()?.user_version, 8);
+      assert.equal(db.prepare('PRAGMA user_version').get()?.user_version, 9);
       assert.deepEqual(snapshot(db), before);
     } finally {
       db.close();

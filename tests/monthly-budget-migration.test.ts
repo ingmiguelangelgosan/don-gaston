@@ -167,7 +167,7 @@ test('budget migration: v2 history and intention bytes survive rollback and v3 m
     try {
       assert.equal(
         inspect.prepare('PRAGMA user_version').get()?.user_version,
-        8,
+        9,
       );
       assert.deepEqual(
         inspect.prepare('SELECT * FROM facts ORDER BY id').all(),

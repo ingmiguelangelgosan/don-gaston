@@ -1,3 +1,11 @@
+import { migration009 } from './migrations/009-personal-loans.ts';
+import { SqlitePersonalLoans } from './sqlite-personal-loans.ts';
+import type { LoanFaults } from './sqlite-personal-loans.ts';
+import type { PersonalLoanStore } from '../application/personal-loan-store.ts';
+import type {
+  LoanCommand,
+  LoanPositionQuery,
+} from '../domain/personal-loans.ts';
 import { migration008 } from './migrations/008-recurring-bills.ts';
 import { SqliteRecurringBills } from './sqlite-recurring-bills.ts';
 import type { BillFaults } from './sqlite-recurring-bills.ts';
@@ -94,6 +102,7 @@ const checksum005 = createHash('sha256').update(migration005.sql).digest('hex');
 const checksum006 = createHash('sha256').update(migration006.sql).digest('hex');
 const checksum007 = createHash('sha256').update(migration007.sql).digest('hex');
 const checksum008 = createHash('sha256').update(migration008.sql).digest('hex');
+const checksum009 = createHash('sha256').update(migration009.sql).digest('hex');
 const schemaQuery =
   "SELECT type,name,tbl_name,sql FROM sqlite_schema WHERE name NOT GLOB 'sqlite_*' ORDER BY type,name";
 function expectedSchema(version: number): string {
@@ -108,6 +117,7 @@ function expectedSchema(version: number): string {
     if (version >= 6) database.exec(migration006.sql);
     if (version >= 7) database.exec(migration007.sql);
     if (version >= 8) database.exec(migration008.sql);
+    if (version >= 9) database.exec(migration009.sql);
     return JSON.stringify(database.prepare(schemaQuery).all());
   } finally {
     database.close();
@@ -123,6 +133,7 @@ const schemas = [
   expectedSchema(6),
   expectedSchema(7),
   expectedSchema(8),
+  expectedSchema(9),
 ];
 const joined = `SELECT f.*, i.fingerprint, i.result_json FROM facts f
   JOIN intents i ON i.instance_ref=f.instance_ref AND i.subject_ref=f.subject_ref
@@ -139,7 +150,7 @@ const budgetsJoined = `SELECT b.*, i.fingerprint, i.result_json FROM budgets b
   JOIN intents i ON i.instance_ref=b.instance_ref AND i.subject_ref=b.subject_ref
   AND i.intent_key=b.intent_key AND i.budget_id=b.id`;
 
-interface Options extends SalaryFaults, BillFaults {
+interface Options extends SalaryFaults, BillFaults, LoanFaults {
   readonly busyTimeoutMs?: number;
   readonly readOnly?: boolean;
   /** Synthetic fault injection only. No production callbacks inside a transaction. */
@@ -322,7 +333,8 @@ export class SqliteExpenseStore
     FinancedDebtStore,
     DebtPaymentCorrectionStore,
     SalaryStore,
-    RecurringBillStore
+    RecurringBillStore,
+    PersonalLoanStore
 {
   readonly #db: DatabaseSync;
   readonly #options: Options;
@@ -424,7 +436,8 @@ export class SqliteExpenseStore
         version !== 5 &&
         version !== 6 &&
         version !== 7 &&
-        version !== 8
+        version !== 8 &&
+        version !== 9
       )
         throw new StorageError('STORAGE_SCHEMA');
       this.#version = version === 0 ? 1 : Number(version);
@@ -519,6 +532,18 @@ export class SqliteExpenseStore
         this.#options.afterMigration?.();
         this.#verify();
       }
+      if (this.#version === 8) {
+        this.#db.exec(migration009.sql);
+        this.#db
+          .prepare(
+            'INSERT INTO schema_migrations(version,checksum) VALUES(?,?)',
+          )
+          .run(9, checksum009);
+        this.#db.exec('PRAGMA user_version=9');
+        this.#version = 9;
+        this.#options.afterMigration?.();
+        this.#verify();
+      }
       this.#db.exec('COMMIT');
     } catch (error) {
       if (this.#db.isTransaction) this.#db.exec('ROLLBACK');
@@ -532,7 +557,7 @@ export class SqliteExpenseStore
     if (
       this.#db.prepare('PRAGMA application_id').get()?.application_id !==
         APPLICATION_ID ||
-      ![1, 2, 3, 4, 5, 6, 7, 8].includes(this.#version) ||
+      ![1, 2, 3, 4, 5, 6, 7, 8, 9].includes(this.#version) ||
       this.#db.prepare('PRAGMA user_version').get()?.user_version !==
         this.#version
     )
@@ -571,7 +596,10 @@ export class SqliteExpenseStore
           migrations[6]?.checksum !== checksum007)) ||
       (this.#version >= 8 &&
         (migrations[7]?.version !== 8 ||
-          migrations[7]?.checksum !== checksum008))
+          migrations[7]?.checksum !== checksum008)) ||
+      (this.#version >= 9 &&
+        (migrations[8]?.version !== 9 ||
+          migrations[8]?.checksum !== checksum009))
     )
       throw new StorageError('STORAGE_SCHEMA');
     if (
@@ -603,6 +631,7 @@ export class SqliteExpenseStore
       new SqliteFinancedDebts(this.#db, this.#version).verify();
     if (this.#version >= 7) new SqliteSalaryReceivables(this.#db).verify();
     if (this.#version >= 8) new SqliteRecurringBills(this.#db).verify();
+    if (this.#version >= 9) new SqlitePersonalLoans(this.#db).verify();
   }
 
   #run<T>(operation: () => T): T {
@@ -761,6 +790,10 @@ export class SqliteExpenseStore
   findIntent(scope: Scope, key: string): IntentResult | undefined {
     return this.#run(() =>
       this.#readSnapshot(() => {
+        if (this.#version >= 9) {
+          const loan = new SqlitePersonalLoans(this.#db).findIntent(scope, key);
+          if (loan) return loan;
+        }
         if (this.#version >= 8) {
           const bill = new SqliteRecurringBills(this.#db).findIntent(
             scope,
@@ -1683,6 +1716,49 @@ export class SqliteExpenseStore
     return this.#billRead((module) =>
       module.monthlyBillCashOutflow(scope, month),
     );
+  }
+
+  executeLoan(
+    scope: Scope,
+    key: string,
+    fingerprint: string,
+    command: LoanCommand,
+  ) {
+    return this.#run(() => {
+      if (this.#options.readOnly) throw new StorageError('STORAGE_READ_ONLY');
+      if (this.#version < 9) throw new StorageError('STORAGE_SCHEMA');
+      if (this.#writing) throw new StorageError('STORAGE_BUSY');
+      this.#writing = true;
+      try {
+        return new SqlitePersonalLoans(this.#db).executeLoan(
+          scope,
+          key,
+          fingerprint,
+          command,
+          (bound, intent) => this.findIntent(bound, intent),
+          this.#options,
+        );
+      } finally {
+        this.#writing = false;
+      }
+    });
+  }
+  #loanRead<T>(operation: (module: SqlitePersonalLoans) => T): T {
+    return this.#run(() =>
+      this.#readSnapshot(() => {
+        if (this.#version < 9) throw new StorageError('STORAGE_SCHEMA');
+        return operation(new SqlitePersonalLoans(this.#db));
+      }),
+    );
+  }
+  getLoanPosition(scope: Scope, query: LoanPositionQuery) {
+    return this.#loanRead((module) => module.getLoanPosition(scope, query));
+  }
+  listLoanPositions(scope: Scope, query: { readonly asOf: string }) {
+    return this.#loanRead((module) => module.listLoanPositions(scope, query));
+  }
+  monthlyLoanCashFlow(scope: Scope, month: string) {
+    return this.#loanRead((module) => module.monthlyLoanCashFlow(scope, month));
   }
 
   close(): void {

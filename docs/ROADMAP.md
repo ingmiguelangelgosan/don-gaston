@@ -111,11 +111,27 @@ Pendientes: correcciones conjuntas de factura/pago, cancelación o revisión de
 conceptos y orquestación de generación mensual. No hay scheduler, recordatorios,
 pagos parciales ni integración externa. La Fase 1 completa sigue abierta.
 
+### Fase 1J — Préstamos entre personas (2026-11-16)
+
+Implementadas contrapartes estables, desembolsos múltiples, abonos parciales/totales
+y posiciones separadas «me deben»/«le debo». Capital con caja propia, sin ingreso
+ganado, consumo ni compensación automática. Excesos y fechas incompatibles quedan
+en revisión durable sin efecto parcial. SQLite v9 aditiva.
+**280/280 pruebas**: 246 previas + 34 nuevas; formato, lint, typecheck y build
+aprobados. Casos A/B/C, importes mayores de 64 bits, cuatro carreras entre procesos,
+rollback, reinicio/restauración, integridad y migración v8 verificados.
+[Informe](reviews/PHASE1_PERSONAL_LOANS.md).
+
+Pendientes: correcciones auditables de capital, resolución asistida de revisiones
+y edición/fusión controlada de contrapartes. Sin intereses, recordatorios, mensajes
+a terceros ni consolidado global de caja. La Fase 1 completa sigue abierta.
+
 ## Fase 2 — Casos financieros MVP
 
 - Orquestación pendiente de revisión mensual de presupuestos y generación de
   facturas (núcleo adelantado a 1I); ampliaciones de gastos fijos, deudas,
-  pagos confirmados, ampliaciones salariales (núcleo FIFO adelantado a 1H), préstamos
+  pagos confirmados, ampliaciones salariales (núcleo FIFO adelantado a 1H), ampliaciones
+  de préstamos (núcleo adelantado a 1J)
   y suscripciones en incrementos separados.
 - **Salida:** pruebas de concurrencia, transacción, reversos, auditoría, permisos, informes de caja/consumo.
 
