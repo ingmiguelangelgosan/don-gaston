@@ -154,6 +154,46 @@ obligaciones, no efectivo disponible. La fecha financiera es civil y explícita;
 el reloj solo registra auditoría. Sin nuevos eventos, notificaciones ni transporte.
 [Alcance, pruebas y límites](reviews/PHASE1_SALARY_RECEIVABLES.md).
 
+## Facturas recurrentes — Fase 1I
+
+`RecurringBillService` valida entradas, contexto y permisos. El puerto
+`RecurringBillStore` expone comandos y consultas; el dominio puro decide
+estimaciones, revisiones y pago completo. `SqliteRecurringBills` comparte la
+conexión del adaptador local sin cambiar la semántica de deudas ni salarios.
+
+SQLite v8 es aditiva: `bill_concepts`, `bill_obligations`, `bill_adjustments`,
+`bill_payments` y `bill_intents`. Las últimas conservan comando, huella, resultado
+original y secuencia. Las referencias incluyen instancia/sujeto; restricciones
+únicas protegen concepto/mes, pago por obligación y cadena de revisión. FK
+recíprocas vinculan cada registro con su intención; triggers mantienen append-only
+y evitan colisiones de claves con gastos, deudas y salarios.
+
+Un pago tiene el mismo ID que su único `Expense` en `facts`. `bill_payments` guarda
+metadatos/vínculos, no otro importe monetario independiente. El gasto conserva el
+formato anterior y un registro técnico en `intents` con clave interna aleatoria,
+enlazada desde el pago. Esa clave no sustituye la intención externa estable;
+permite reutilizar las FK de alertas y los verificadores existentes sin reescribir
+tablas antiguas. Todas las escrituras, incluidas alertas, ocurren en un único
+`BEGIN IMMEDIATE`; la clave interna solo se crea para una operación nueva y no
+se regenera tras un commit incierto.
+
+Consumo y presupuesto leen el único gasto por fecha de pago. La vista de caja de
+facturas referencia el mismo ID. No se suman entre sí. Un ajuste de factura pendiente
+no crea gasto. Corregir aisladamente un gasto vinculado se bloquea en aplicación y
+SQL hasta implementar correcciones conjuntas de factura/pago.
+
+Las lecturas usan snapshot y reconstruyen los comandos en orden durable; verifican
+estimación fuente, revisión, pago y correspondencia exacta con gasto/huella/resultado.
+El control de revisión y la exclusión de pagos se validan bajo el bloqueo de escritura.
+Límites locales existentes: 4096 dígitos monetarios, 32768 bytes por comando/resultado,
+10000 intenciones de facturas por ámbito y 64 MiB por archivo. Reconstrucción síncrona
+completa, potencial coste cuadrático y sin paginación; no se midió rendimiento al límite.
+Las huellas no autentican un archivo reescrito coherentemente por un atacante.
+
+La futura generación mensual requiere orquestación explícita, calendario y claves
+estables fuera del dominio. No hay scheduler, servicio nuevo ni integración Jarvis.
+[Decisiones, orquestación pendiente y evidencia](reviews/PHASE1_RECURRING_BILLS.md).
+
 ## Integración con Jarvis: propuesta, no hecho
 
 - HTTPS + JSON versionado, autenticado; red privada o endpoint explícitamente autorizado.

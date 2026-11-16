@@ -1,6 +1,6 @@
 ﻿# Don Gastón — agente financiero independiente
 
-**Estado: Fase 1H, salario neto y cartera del empleador implementados y verificados localmente el 2026-11-15.** Vigencias mensuales, pendientes de apertura, cierre explícito y abonos FIFO con una entrada de caja por pago confirmado; SQLite v7 aislado. **208 pruebas aprobadas.** Exclusivamente datos sintéticos. Se conservan los módulos previos y el adaptador en memoria. La Fase 1 completa sigue abierta; sin API ni conexión con Sir Jarvis. Sin commits ni PR en este incremento.
+**Estado: Fase 1I, gastos fijos y facturas recurrentes implementados y verificados localmente el 2026-11-16.** Obligaciones mensuales independientes, importes estimados/confirmados/desconocidos, ajustes auditables y pagos completos vinculados a un único gasto; SQLite v8 aislado. **246 pruebas aprobadas.** Exclusivamente datos sintéticos. Se conservan los módulos previos y el adaptador en memoria. La Fase 1 completa sigue abierta; sin API ni conexión con Sir Jarvis. Sin commits ni PR en este incremento.
 
 Don Gastón es propietario de las reglas financieras; Sir Jarvis conserva canales, identidad conversacional, orquestación y confirmaciones. Solo el alcance descrito aquí está implementado; las demás reglas de producto siguen siendo requisitos. La referencia histórica se conserva sin cambios.
 
@@ -438,12 +438,44 @@ Logs locales ignorados: `.cache/salary-receivables-format.log` y
 importes mayores de 64 bits, reinicio, restauración, concurrencia, rollback,
 migración e integridad.
 
+## Gastos fijos y facturas — Fase 1I
+
+`RecurringBillService` ofrece `createConcept`, `generateObligation`,
+`adjustObligation` y `confirmPayment`, siempre con contexto autorizado y clave de
+intención. Consultas: `getObligation`, `listObligations({asOf, conceptId?})`,
+`monthlyCashOutflow({month})` y `findIntent`.
+
+Cada concepto/mes tiene una obligación independiente. Sin importe conocido queda
+desconocida; para conceptos variables se estima desde el último pago efectivo,
+conservando la fuente. El importe real se confirma mediante una revisión auditable.
+Solo se admiten pagos completos de una revisión confirmada y explícita.
+
+**Decisión aprobada:** el consumo y presupuesto corresponden al mes del pago.
+La factura conserva su mes facturado. Pago y gasto comparten ID: una sola salida
+de caja, reutilizada en las proyecciones existentes y las alertas presupuestarias.
+Obligaciones pendientes no crean gastos ni caja. No hay scheduler ni recordatorios.
+
+Fixture verificada: internet de octubre pagado por $95.000 COP; noviembre por
+$98.000 pendiente; diciembre estima $95.000 desde octubre. Confirmar y pagar
+noviembre no modifica la estimación ni el estado de diciembre. Reintentos no
+duplican obligaciones, pagos o alertas.
+
+SQLite v8 añade tablas sin reescribir las versiones 1–7. La transacción reúne
+pago, gasto, intenciones y alertas. Se bloquean ajustes después del pago y
+correcciones aisladas del gasto vinculado hasta definir su corrección conjunta.
+[Reglas](docs/PRODUCT_RULES.md) e [informe completo](docs/reviews/PHASE1_RECURRING_BILLS.md).
+
+Verificado el 2026-11-16: `npm.cmd run format` y `npm.cmd run check`, salida 0;
+formato, lint, typecheck, **246/246 pruebas** (208 previas + 38 nuevas) y build.
+Logs locales: `.cache/recurring-bills-format.log` y `.cache/recurring-bills-check.log`.
+Sin dependencias nuevas, integración externa ni habilitación de datos reales.
+
 ## Pendientes y siguiente fase
 
 - [ADR-001](docs/adr/001-persistence.md) aprobado e implementado para categorías/gastos sintéticos. Antes de un piloto faltan objetivos operativos de respaldo/retención, permisos y recuperación ante fallos físicos.
 - [ADR-002](docs/adr/002-jarvis-contract.md): cotejo contractual y aprobación futura; el borrador no garantiza compatibilidad.
 - El núcleo presupuestario usa fracciones exactas y meses civiles explícitos. Redondeo de presentación y orquestación del ciclo mensual siguen pendientes; no se habilita copia automática de límites.
-- Fase 1 incluye el núcleo salarial FIFO; su cierre completo sigue pendiente. Siguiente incremento recomendado: definir correcciones auditables de abonos y reasignaciones salariales, con revisión de excedentes y fechas retroactivas, usando fixtures sin bancos.
+- Fase 1 incluye el núcleo de facturas recurrentes; su cierre completo sigue pendiente. Siguiente incremento recomendado: correcciones conjuntas de factura/pago/gasto, preservando caja, consumo, presupuesto y estimaciones posteriores. También siguen pendientes correcciones y revisiones salariales, sin integrar bancos.
 - Autenticación/autorización operativa, recibos privados, respaldo/restauración de información real, datos reales y despliegue siguen pendientes. La idempotencia y recuperación verificadas aquí son locales con fixtures; no certifican producción.
 - CI usa tags de acciones y la línea Node 24: posible deriva de versiones; no fue ejecutado remotamente. `.gitignore` no es un control de acceso ni garantiza ausencia de secretos.
 

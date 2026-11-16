@@ -210,6 +210,72 @@ se incorporan mediante el incremento siguiente.
 - Varias mensualidades impagas coexisten y se suman; asociar pagos a mes exacto, preguntar si ambiguo.
 - Servicios: pago completo en primera versión; otras deudas/préstamos sí admiten abonos parciales.
 
+### 5.1 Gastos fijos y facturas — Fase 1I, 2026-11-16
+
+Implementa la referencia original §5 con generación **explícita**, por autorización
+del usuario. La generación automática queda pendiente de orquestación.
+
+- Concepto estable e inmutable: descripción, categoría existente y COP. Puede
+  tener importe fijo habitual y regla de vencimiento opcionales. Un importe fijo
+  configura una estimación, no confirma automáticamente una factura.
+- Vencimiento habitual exige día 1–31 y desplazamiento explícito: 0 para el mes
+  facturado, 1 para el siguiente. Se ajusta al último día existente cuando sea
+  necesario. Sin ambos datos no se infiere vencimiento. Cada obligación puede
+  indicar una fecha concreta o `null` para ausencia explícita.
+- `generateObligation` requiere concepto, periodo `YYYY-MM` y fecha civil
+  `generatedOn`. Solo una obligación por concepto/mes/ámbito; varias mensualidades
+  pendientes coexisten. Reintentar la misma intención devuelve el original; otra
+  intención para el mismo periodo produce `BILL_OBLIGATION_EXISTS`.
+- Importe desconocido es `null`, distinto de cero, estimado y confirmado. Los
+  importes conocidos son positivos. Si se suministra importe explícito también
+  se exige indicar `estimated` o `confirmed`; nunca se adivina el estado.
+- Sin importe explícito, un concepto fijo usa su base como estimación. Un concepto
+  variable usa el último pago confirmado conocido con fecha de pago no posterior
+  a `generatedOn`: mayor fecha civil y, en empate, último registro durable. Si no
+  existe, queda desconocido. No se usan facturas pendientes como fuente.
+- La estimación conserva su pago fuente. Pagos registrados después no recalculan
+  obligaciones ya generadas. Cada obligación y cada revisión son inmutables.
+- `adjustObligation` permite confirmar/ajustar importe antes de pagar, con motivo,
+  actor, instante UTC y `expectedRevisionId`. La revisión inicial es el ID de la
+  obligación; después es el ID del último ajuste. Una revisión obsoleta produce
+  `BILL_REVISION_CONFLICT`, sin consumir la intención.
+- `confirmPayment` exige obligación concreta, revisión vigente confirmada, importe
+  efectivo exactamente igual al confirmado, fecha civil y referencia. No admite
+  pagos parciales ni asignación ambigua de un concepto a varios meses. La fecha
+  de pago debe ser igual/posterior a la fecha civil de generación informada.
+  Un importe distinto requiere ajustar primero; un estimado debe confirmarse.
+- **Decisión aprobada por el usuario:** solo el pago confirmado contribuye al
+  consumo y presupuesto, por su fecha civil de pago. Una factura de noviembre
+  pagada en diciembre afecta caja y presupuesto de diciembre. Conserva noviembre
+  como periodo de obligación. Generar o ajustar una obligación no crea consumo,
+  salida de caja ni alerta presupuestaria.
+- El pago comparte ID con un único gasto existente (`expenseId = id`). Su vista
+  de caja y su contribución a consumo reutilizan ese hecho; no deben sumarse como
+  movimientos diferentes. Gasto, vínculo a obligación, intención y alertas se
+  confirman en la misma transacción. Las reglas previas de alertas 80/100 permanecen.
+- Un segundo pago con otra clave se rechaza como `BILL_ALREADY_PAID`; reintentar la
+  intención original devuelve el mismo pago. Después del pago no se ajusta la
+  factura. Se bloquea también anular/reemplazar aisladamente su gasto vinculado
+  (`BILL_PAYMENT_CORRECTION_REQUIRED`): la corrección conjunta queda pendiente.
+- `getObligation` conserva obligación original, revisiones, versión vigente y pago.
+  `listObligations` admite fecha explícita `asOf` y filtro de concepto; distingue
+  pagadas, pendientes y vencidas. Un pago posterior a la consulta aún no liquida
+  el periodo en esa vista. Se excluyen generaciones posteriores a `asOf`; los
+  importes usan las revisiones actualmente conocidas, no auditoría temporal.
+- El vencimiento es inclusivo: vencida desde el día siguiente si no está pagada.
+  Sin vencimiento permanece pendiente. Totales confirmados y estimados se separan;
+  importes desconocidos se cuentan, no se tratan como cero. Los vencidos son un
+  subconjunto de los pendientes, no otro importe que se les deba sumar.
+- Permisos `bill:write` para concepto/generación/ajuste, `bill:pay` para confirmar
+  pago y `bill:read` para consultas, incluidos reintentos autorizados. Contexto
+  actor/sujeto/instancia vinculado fuera del payload. Idempotencia global por ámbito;
+  referencia textual no es una clave bancaria ni sustituye la intención estable.
+
+No hay programación automática, recordatorios, pagos parciales, edición de
+conceptos, cancelación de obligaciones ni correcciones de pagos vinculados.
+La integración y orquestación futura se describen en
+[el informe del incremento](reviews/PHASE1_RECURRING_BILLS.md).
+
 ## 6. Salario y cuentas por cobrar
 
 - Configurar salario **neto** y vigencia histórica. Cierre de mes: generar salario esperado, no saldo disponible.

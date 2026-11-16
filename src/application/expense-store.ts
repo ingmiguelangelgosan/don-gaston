@@ -1,3 +1,4 @@
+import type { BillResult } from '../domain/recurring-bills.ts';
 import type { Category, Expense } from '../domain/expenses.ts';
 import type { ExpenseCorrection } from '../domain/expense-corrections.ts';
 import type { MonthlyBudget } from '../domain/monthly-budgets.ts';
@@ -34,7 +35,10 @@ export type Action =
   | 'salary:configure'
   | 'salary:close'
   | 'salary:receive'
-  | 'salary:read';
+  | 'salary:read'
+  | 'bill:write'
+  | 'bill:pay'
+  | 'bill:read';
 export interface AccessPolicy {
   allows(context: AccessContext, action: Action): boolean;
 }
@@ -52,7 +56,8 @@ export type IntentResult =
   | DebtPaymentCorrection
   | SalaryVersion
   | SalaryPeriod
-  | SalaryReceipt;
+  | SalaryReceipt
+  | BillResult;
 
 /**
  * Implementations must atomically commit intent fingerprint + immutable fact.

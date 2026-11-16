@@ -170,7 +170,7 @@ test('event migration: v3 history preserved, backfill deterministic, rollback at
   try {
     const db = new DatabaseSync(path, { readOnly: true });
     try {
-      assert.equal(db.prepare('PRAGMA user_version').get()?.user_version, 7);
+      assert.equal(db.prepare('PRAGMA user_version').get()?.user_version, 8);
       assert.deepEqual(history(db), original);
       assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(), []);
     } finally {

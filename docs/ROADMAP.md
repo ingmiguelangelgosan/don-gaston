@@ -96,9 +96,25 @@ Pendientes: correcciones auditables de recibos y asignaciones salariales, resolu
 de excedentes/registro retroactivo, prorrateo y múltiples empleadores. No hay
 cierre automático, recordatorios ni integración externa. La Fase 1 sigue abierta.
 
+### Fase 1I — Gastos fijos y facturas recurrentes (2026-11-16)
+
+Implementados conceptos, obligaciones independientes por periodo, importes
+desconocidos/estimados/confirmados, ajuste auditable y pagos completos con revisión
+vigente explícita. Decisión aprobada: consumo y presupuesto en el mes del pago.
+Un único gasto por pago alimenta consumo y caja, sin duplicación. SQLite v8 aditiva.
+**246/246 pruebas**: 208 anteriores + 38 nuevas; formato, lint, typecheck y build
+aprobados. Migración v7, reinicio/restauración, rollback con alertas, aislamiento,
+integridad y cinco carreras entre procesos verificados.
+[Informe](reviews/PHASE1_RECURRING_BILLS.md).
+
+Pendientes: correcciones conjuntas de factura/pago, cancelación o revisión de
+conceptos y orquestación de generación mensual. No hay scheduler, recordatorios,
+pagos parciales ni integración externa. La Fase 1 completa sigue abierta.
+
 ## Fase 2 — Casos financieros MVP
 
-- Orquestación pendiente de revisión mensual de presupuestos; gastos fijos, deudas,
+- Orquestación pendiente de revisión mensual de presupuestos y generación de
+  facturas (núcleo adelantado a 1I); ampliaciones de gastos fijos, deudas,
   pagos confirmados, ampliaciones salariales (núcleo FIFO adelantado a 1H), préstamos
   y suscripciones en incrementos separados.
 - **Salida:** pruebas de concurrencia, transacción, reversos, auditoría, permisos, informes de caja/consumo.

@@ -1,3 +1,8 @@
+import { migration008 } from './migrations/008-recurring-bills.ts';
+import { SqliteRecurringBills } from './sqlite-recurring-bills.ts';
+import type { BillFaults } from './sqlite-recurring-bills.ts';
+import type { RecurringBillStore } from '../application/recurring-bill-store.ts';
+import type { BillCommand, BillListQuery } from '../domain/recurring-bills.ts';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { closeSync, existsSync, lstatSync, openSync, statSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
@@ -88,6 +93,7 @@ const checksum004 = createHash('sha256').update(migration004.sql).digest('hex');
 const checksum005 = createHash('sha256').update(migration005.sql).digest('hex');
 const checksum006 = createHash('sha256').update(migration006.sql).digest('hex');
 const checksum007 = createHash('sha256').update(migration007.sql).digest('hex');
+const checksum008 = createHash('sha256').update(migration008.sql).digest('hex');
 const schemaQuery =
   "SELECT type,name,tbl_name,sql FROM sqlite_schema WHERE name NOT GLOB 'sqlite_*' ORDER BY type,name";
 function expectedSchema(version: number): string {
@@ -101,6 +107,7 @@ function expectedSchema(version: number): string {
     if (version >= 5) database.exec(migration005.sql);
     if (version >= 6) database.exec(migration006.sql);
     if (version >= 7) database.exec(migration007.sql);
+    if (version >= 8) database.exec(migration008.sql);
     return JSON.stringify(database.prepare(schemaQuery).all());
   } finally {
     database.close();
@@ -115,6 +122,7 @@ const schemas = [
   expectedSchema(5),
   expectedSchema(6),
   expectedSchema(7),
+  expectedSchema(8),
 ];
 const joined = `SELECT f.*, i.fingerprint, i.result_json FROM facts f
   JOIN intents i ON i.instance_ref=f.instance_ref AND i.subject_ref=f.subject_ref
@@ -131,7 +139,7 @@ const budgetsJoined = `SELECT b.*, i.fingerprint, i.result_json FROM budgets b
   JOIN intents i ON i.instance_ref=b.instance_ref AND i.subject_ref=b.subject_ref
   AND i.intent_key=b.intent_key AND i.budget_id=b.id`;
 
-interface Options extends SalaryFaults {
+interface Options extends SalaryFaults, BillFaults {
   readonly busyTimeoutMs?: number;
   readonly readOnly?: boolean;
   /** Synthetic fault injection only. No production callbacks inside a transaction. */
@@ -313,7 +321,8 @@ export class SqliteExpenseStore
     EventDeliveryStore,
     FinancedDebtStore,
     DebtPaymentCorrectionStore,
-    SalaryStore
+    SalaryStore,
+    RecurringBillStore
 {
   readonly #db: DatabaseSync;
   readonly #options: Options;
@@ -414,7 +423,8 @@ export class SqliteExpenseStore
         version !== 4 &&
         version !== 5 &&
         version !== 6 &&
-        version !== 7
+        version !== 7 &&
+        version !== 8
       )
         throw new StorageError('STORAGE_SCHEMA');
       this.#version = version === 0 ? 1 : Number(version);
@@ -497,6 +507,18 @@ export class SqliteExpenseStore
         this.#options.afterMigration?.();
         this.#verify();
       }
+      if (this.#version === 7) {
+        this.#db.exec(migration008.sql);
+        this.#db
+          .prepare(
+            'INSERT INTO schema_migrations(version,checksum) VALUES(?,?)',
+          )
+          .run(8, checksum008);
+        this.#db.exec('PRAGMA user_version=8');
+        this.#version = 8;
+        this.#options.afterMigration?.();
+        this.#verify();
+      }
       this.#db.exec('COMMIT');
     } catch (error) {
       if (this.#db.isTransaction) this.#db.exec('ROLLBACK');
@@ -510,7 +532,7 @@ export class SqliteExpenseStore
     if (
       this.#db.prepare('PRAGMA application_id').get()?.application_id !==
         APPLICATION_ID ||
-      ![1, 2, 3, 4, 5, 6, 7].includes(this.#version) ||
+      ![1, 2, 3, 4, 5, 6, 7, 8].includes(this.#version) ||
       this.#db.prepare('PRAGMA user_version').get()?.user_version !==
         this.#version
     )
@@ -546,7 +568,10 @@ export class SqliteExpenseStore
           migrations[5]?.checksum !== checksum006)) ||
       (this.#version >= 7 &&
         (migrations[6]?.version !== 7 ||
-          migrations[6]?.checksum !== checksum007))
+          migrations[6]?.checksum !== checksum007)) ||
+      (this.#version >= 8 &&
+        (migrations[7]?.version !== 8 ||
+          migrations[7]?.checksum !== checksum008))
     )
       throw new StorageError('STORAGE_SCHEMA');
     if (
@@ -577,6 +602,7 @@ export class SqliteExpenseStore
     if (this.#version >= 5)
       new SqliteFinancedDebts(this.#db, this.#version).verify();
     if (this.#version >= 7) new SqliteSalaryReceivables(this.#db).verify();
+    if (this.#version >= 8) new SqliteRecurringBills(this.#db).verify();
   }
 
   #run<T>(operation: () => T): T {
@@ -735,6 +761,13 @@ export class SqliteExpenseStore
   findIntent(scope: Scope, key: string): IntentResult | undefined {
     return this.#run(() =>
       this.#readSnapshot(() => {
+        if (this.#version >= 8) {
+          const bill = new SqliteRecurringBills(this.#db).findIntent(
+            scope,
+            key,
+          );
+          if (bill) return bill;
+        }
         if (this.#version >= 7) {
           const salary = new SqliteSalaryReceivables(this.#db).findIntent(
             scope,
@@ -929,6 +962,16 @@ export class SqliteExpenseStore
         }
         const original = this.#getExpense(scope, originalExpenseId);
         if (!original) throw new DomainError('EXPENSE_NOT_FOUND');
+        if (
+          this.#version >= 8 &&
+          this.#db
+            .prepare(
+              'SELECT 1 FROM bill_payments WHERE instance_ref=? AND subject_ref=? AND id=?',
+            )
+            .get(scope.instanceRef, scope.subjectRef, originalExpenseId)
+        )
+          throw new DomainError('BILL_PAYMENT_CORRECTION_REQUIRED');
+
         if (
           this.#db
             .prepare(
@@ -1556,6 +1599,90 @@ export class SqliteExpenseStore
   }
   monthlyCashInflow(scope: Scope, month: string) {
     return this.#salaryRead((module) => module.monthlyCashInflow(scope, month));
+  }
+
+  #recordBillExpense(scope: Scope, expense: Expense, key: string): void {
+    // Called only under the bill transaction; same ID is the payment's cash fact.
+    this.#db
+      .prepare(
+        `INSERT INTO facts(instance_ref,subject_ref,id,intent_key,kind,actor_ref,category_id,category_kind,amount_minor,currency,occurred_on)
+      VALUES(?,?,?,?,'expense',?,?,'category',?,'COP',?)`,
+      )
+      .run(
+        scope.instanceRef,
+        scope.subjectRef,
+        expense.id,
+        key,
+        expense.actorRef,
+        expense.categoryId,
+        expense.amount.minor.toString(),
+        expense.occurredOn,
+      );
+    this.#options.afterBillExpenseInsert?.();
+    this.#db
+      .prepare(
+        'INSERT INTO intents(instance_ref,subject_ref,intent_key,fact_id,fingerprint,result_json) VALUES(?,?,?,?,?,?)',
+      )
+      .run(
+        scope.instanceRef,
+        scope.subjectRef,
+        key,
+        expense.id,
+        hash(expense),
+        serialize(expense),
+      );
+    this.#evaluateBudget(
+      scope,
+      expense.categoryId,
+      expense.occurredOn.slice(0, 7),
+      key,
+    );
+  }
+  executeBill(
+    scope: Scope,
+    key: string,
+    fingerprint: string,
+    command: BillCommand,
+  ) {
+    return this.#run(() => {
+      if (this.#options.readOnly) throw new StorageError('STORAGE_READ_ONLY');
+      if (this.#version < 8) throw new StorageError('STORAGE_SCHEMA');
+      if (this.#writing) throw new StorageError('STORAGE_BUSY');
+      this.#writing = true;
+      try {
+        return new SqliteRecurringBills(this.#db).executeBill(
+          scope,
+          key,
+          fingerprint,
+          command,
+          (bound, intent) => this.findIntent(bound, intent),
+          (bound, expense, intent) =>
+            this.#recordBillExpense(bound, expense, intent),
+          this.#options,
+        );
+      } finally {
+        this.#writing = false;
+      }
+    });
+  }
+  #billRead<T>(operation: (module: SqliteRecurringBills) => T): T {
+    return this.#run(() =>
+      this.#readSnapshot(() => {
+        if (this.#version < 8) throw new StorageError('STORAGE_SCHEMA');
+        return operation(new SqliteRecurringBills(this.#db));
+      }),
+    );
+  }
+  getObligation(scope: Scope, id: string, asOf: string) {
+    return this.#billRead((module) => module.getObligation(scope, id, asOf));
+  }
+  listObligations(scope: Scope, query: BillListQuery) {
+    return this.#billRead((module) => module.listObligations(scope, query));
+  }
+  monthlyBillCashOutflow(scope: Scope, month: string) {
+    return this.#billRead((module) =>
+      module.monthlyBillCashOutflow(scope, month),
+    );
   }
 
   close(): void {
