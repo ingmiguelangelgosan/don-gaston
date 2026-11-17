@@ -152,10 +152,32 @@ Sin flujo de caja global, cobranza, scheduler ni integración. La Fase 1 sigue a
 HTTPS y journal SQLite reales de Jarvis. Registro/lookup, reintentos, permisos,
 TLS, límites y recuperación sin desbloquear estados inciertos verificados.
 Sin cambios en Jarvis, reglas financieras ni migraciones; sin arranque operativo.
-El Node disponible (24.19.0) está fuera del mínimo declarado por Jarvis (24.22.1):
-repetir en una versión admitida por ambos es el siguiente paso antes de promover
-la integración. [Evidencia y pendientes](reviews/JARVIS_REAL_GATEWAY_INTEROP.md).
+La limitación inicial de Node se resolvió en Fase 2B: **20/20** con portátil
+24.22.3, sin cambiar Node global. [Evidencia del runtime](reviews/JARVIS_NODE_COMPATIBILITY.md).
+[Evidencia de componentes](reviews/JARVIS_REAL_GATEWAY_INTEROP.md).
 No se declara cerrada la Fase 1 ni autorizado el uso real.
+
+### Fase 2C — conversación determinista de prueba
+
+Preparación, confirmación explícita, cancelación previa y recuperación por lookup
+implementadas exclusivamente en fixtures. Estado en una cuarta base separada;
+ninguna nueva escritura para recuperar incertidumbre. **34/34 pruebas optativas**
+con Node 24.22.3 (14 nuevas y 20 de interoperabilidad), formato, lint, typecheck y
+build aprobados. No cambia el bot ni las capacidades existentes. Pendientes:
+conciliación operativa auditable, respaldo coordinado y composición conversacional
+real por separado. [Informe](reviews/JARVIS_CONFIRMATION_FLOW.md).
+
+### Fases 2D/2E — diseño e integración conversacional sintética
+
+Diseño aprobado y ruta optativa implementada en Jarvis, separada de `/agent`
+read-only. Handler/polling reales con TelegramApi simulada, consentimiento durable
+en cuarta base y record/lookup HTTPS Don Gastón. **60/60** pruebas optativas en
+Don Gastón y **123/123** de regresión dirigida Jarvis, Node 24.22.3. Lint,
+typecheck y build aprobados en ambos; formato modificado aprobado, formato global
+Jarvis falla en 20 archivos ajenos bajo `.agents/skills/security-audit/`.
+Sin activar loader/main, FIN-01 o datos reales. Pendientes respaldo coordinado,
+conciliación y eventual autorización de canal operativo.
+[Informe y archivos por repositorio](reviews/JARVIS_CONVERSATIONAL_E2E.md).
 
 - Orquestación pendiente de revisión mensual de presupuestos y generación de
   facturas (núcleo adelantado a 1I); ampliaciones de gastos fijos, deudas,

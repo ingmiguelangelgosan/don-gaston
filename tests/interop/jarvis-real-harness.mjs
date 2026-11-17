@@ -89,7 +89,16 @@ export async function setup(options = {}) {
       actions: ['expense:record', 'expense:read'],
     },
   ];
-  let store, journal, stateStore, adapter, server, gateway, transport, service;
+  let store,
+    journal,
+    stateStore,
+    adapter,
+    server,
+    gateway,
+    transport,
+    service,
+    registry,
+    schemas;
   let calls = 0,
     drop = options.dropOnce === true,
     category;
@@ -207,7 +216,12 @@ export async function setup(options = {}) {
           },
         })),
       );
-      const schemas = new CapabilitySchemaCatalog(definitions);
+      schemas = new CapabilitySchemaCatalog(
+        options.financeProfile
+          ? (await source('src/agents/finance-expense-profile.ts'))
+              .financeExpenseSchemas
+          : definitions,
+      );
       const capabilities = capabilityNames.map((name, index) => ({
         name,
         version: '1.0',
@@ -217,7 +231,7 @@ export async function setup(options = {}) {
         input_schema_id: `${name}.input.v1`,
         output_schema_id: `${name}.output.v1`,
       }));
-      const registry = new InMemoryAgentRegistry(
+      registry = new InMemoryAgentRegistry(
         [
           {
             instance_id: actor.instance_id,
@@ -307,6 +321,16 @@ export async function setup(options = {}) {
     record,
     lookup,
     schemaChecks,
+    // Test composition ports; no operational loader or additional network surface.
+    get registry() {
+      return registry;
+    },
+    get execution() {
+      return service;
+    },
+    get durableStore() {
+      return stateStore;
+    },
     get calls() {
       return calls;
     },
@@ -323,6 +347,19 @@ export async function setup(options = {}) {
     },
     reservation(request) {
       return journal.has(requestKey(request));
+    },
+    restartGateway() {
+      gateway.close();
+      // Preserve the live transport/store: reconstruct only volatile execution state.
+      gateway = new DurableAgentGateway(
+        registry,
+        schemas,
+        transport,
+        stateStore,
+        fingerprintKey,
+        { resultCacheMs: 30000, attemptTimeoutMs: 2000, totalTimeoutMs: 4000 },
+      );
+      service = new AgentExecutionService(registry, gateway);
     },
     async restart() {
       await closeComponents();

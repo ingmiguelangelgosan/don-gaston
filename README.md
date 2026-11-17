@@ -1,16 +1,24 @@
 ﻿# Don Gastón — agente financiero independiente
 
-**Estado: interoperabilidad local con componentes reales de Jarvis verificada el 2026-11-17.** Registry, Gateway durable y transporte HTTPS ejecutan registro y consulta de gastos sintéticos. **20 pruebas optativas de interoperabilidad aprobadas**; las 354 pruebas anteriores corresponden al incremento previo. SQLite financiero v10 y journal del adaptador v1 sin cambios. Pendiente repetir en un Node admitido por ambos proyectos: esta ejecución usó 24.19.0 y Jarvis exige ≥24.22.1. La Fase 1 sigue abierta; sin arranque del Jarvis operativo, datos reales ni despliegue.
+**Estado: integración conversacional sintética verificada el 2026-11-17.** Handler/polling, Registry, Gateway durable y HTTPS reales de Jarvis con TelegramApi simulada: preparación, consentimiento durable y un gasto único. **60/60 pruebas optativas en Don Gastón y 123/123 de regresión dirigida en Jarvis**, con Node portátil 24.22.3. SQLite financiero v10 sin cambios. Ruta deshabilitada por defecto; sin bot operativo, datos reales ni despliegue. [Resultados y limitaciones de Fase 2E](docs/reviews/JARVIS_CONVERSATIONAL_E2E.md).
 
 Don Gastón es propietario de las reglas financieras; Sir Jarvis conserva canales, identidad conversacional, orquestación y confirmaciones. Solo el alcance descrito aquí está implementado; las demás reglas de producto siguen siendo requisitos. La referencia histórica se conserva sin cambios.
 
 ## Interoperabilidad local optativa — Fase 2A
 
 ```powershell
+# Selección de runtime solo en esta PowerShell temporal (Fase 2B):
+$env:PATH = (Resolve-Path .cache/runtimes/node-v24.22.3-win-x64).Path + ';' + $env:PATH
 # Checkout local confiable, exclusivamente de pruebas; nunca una ruta recibida del usuario remoto.
 $env:JARVIS_INTEROP_REPO = 'D:/Documentos/sir-jarvis'
 npm.cmd run test:interop
 ```
+
+Fase 2C añade un controlador exclusivo de pruebas: preparar, confirmar, cancelar
+y consultar evidencia de un gasto. Mantiene una cuarta base `flow.sqlite` separada,
+conserva la intención y nunca repite una escritura incierta. Una consulta exitosa
+no reconcilia el journal de Jarvis. [Estados, pruebas y límites](docs/reviews/JARVIS_CONFIRMATION_FLOW.md).
+La compatibilidad del runtime se verificó en [Fase 2B](docs/reviews/JARVIS_NODE_COMPATIBILITY.md).
 
 Carga las clases reales desde ese checkout, sin copiar el Gateway ni arrancar
 Jarvis. Necesita sus dependencias locales ya instaladas y OpenSSL. La suite normal
