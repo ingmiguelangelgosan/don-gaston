@@ -1,8 +1,27 @@
 ﻿# Don Gastón — agente financiero independiente
 
-**Estado: Fase 1K, suscripciones personales y compartidas implementadas y verificadas localmente el 2026-11-16.** Obligaciones mensuales, pagos confirmados, reparto exacto, consumo propio y reembolsos FIFO; SQLite v10 aislado. **321 pruebas aprobadas.** Exclusivamente datos sintéticos. Se conservan los módulos previos y el adaptador en memoria. La Fase 1 completa sigue abierta; sin API ni conexión con Sir Jarvis. Sin commits ni PR en este incremento.
+**Estado: demostración sintética de integración verificada el 2026-11-17.** Registro y consulta de gastos mediante envelope 1.0, frontera autenticada y HTTPS efímero de pruebas; SQLite financiero v10 sin cambios. **354 pruebas aprobadas.** Se conservan los módulos financieros y el adaptador en memoria. La Fase 1 sigue abierta; sin conexión al runtime real de Sir Jarvis, datos reales ni API desplegada. Sin commits ni PR en este incremento.
 
 Don Gastón es propietario de las reglas financieras; Sir Jarvis conserva canales, identidad conversacional, orquestación y confirmaciones. Solo el alcance descrito aquí está implementado; las demás reglas de producto siguen siendo requisitos. La referencia histórica se conserva sin cambios.
+
+## Demostración HTTPS local aprobada
+
+```powershell
+node --test tests/jarvis-demo-contract.test.ts tests/jarvis-demo-journal.test.ts tests/jarvis-synthetic-integration.test.ts
+```
+
+Genera certificados y credenciales sintéticos, abre un receptor temporal únicamente
+en loopback y lo cierra al terminar. Requiere OpenSSL local (Git para Windows
+incluye el utilizado en esta ejecución); no instala certificados ni dependencias.
+Registra 45.000 COP, reintenta sin duplicar, consulta por intención, simula respuesta
+perdida y recupera desde otro proceso. Comprueba TLS, scopes, permisos y límites.
+
+El consumidor es simulado, con el contrato inspeccionado; **no es una prueba del
+runtime real Jarvis**. Hay dos archivos sintéticos: ledger financiero y journal de
+huellas de solicitudes. La reapertura exige conservar la pareja; no hay transacción
+ni respaldo coordinados entre ambos. No se activa un servicio desde `npm start`.
+[Perfil contractual](docs/AGENT_PROTOCOL_DRAFT.md) y
+[evidencias, archivos y límites](docs/reviews/JARVIS_SYNTHETIC_INTEGRATION.md).
 
 ## Suscripciones personales y compartidas
 
