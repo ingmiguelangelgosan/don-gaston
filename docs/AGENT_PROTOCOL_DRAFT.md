@@ -4,12 +4,15 @@ Actualización: 2026-11-17. El usuario aprobó formalmente el perfil mínimo de
 [preparación de integración](reviews/JARVIS_INTEGRATION_READINESS.md).
 Se implementó un adaptador para el envelope genérico **1.0 inspeccionado en Jarvis**.
 El nombre de este archivo es histórico. El alcance aprobado es la demostración
-local; **no declara interoperabilidad con el runtime real de Jarvis** ni uso productivo.
+local; se probaron componentes reales en un harness aislado. No se arrancó el
+runtime operativo de Jarvis ni se autorizó uso productivo.
 
 Fuente cotejada: `D:/Documentos/sir-jarvis/docs/AGENT_PROTOCOL.md` y código
 `src/agents/`, HEAD `c015c4e02908676fa8f87fc7bf524580169bb578`.
-No se modificó Jarvis ni se importan sus módulos privados.
-[Evidencia ejecutada](reviews/JARVIS_SYNTHETIC_INTEGRATION.md).
+No se modificó Jarvis. El harness optativo `tests/interop/` importa clases reales
+desde un checkout local confiable; el código de aplicación/build de Don Gastón
+sigue independiente. [Demostración inicial](reviews/JARVIS_SYNTHETIC_INTEGRATION.md)
+y [evidencia de componentes reales y limitación de Node](reviews/JARVIS_REAL_GATEWAY_INTEROP.md).
 
 ## Capacidades y schemas
 
@@ -147,7 +150,7 @@ no demuestra ausencia de commit: consultar la intención.
 
 ## Fuera de alcance
 
-Runtime real Jarvis, Telegram, FIN-01 productivo, datos reales, gestión operativa
+Arranque del Jarvis operativo, Telegram, FIN-01 productivo, datos reales, gestión operativa
 de credenciales, servicios permanentes, despliegue, eventos/HMAC/deduplicación
 externa y otras capacidades. El contrato local de eventos no cambia.
 La Fase 1 completa permanece abierta.

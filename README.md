@@ -1,8 +1,27 @@
 ﻿# Don Gastón — agente financiero independiente
 
-**Estado: demostración sintética de integración verificada el 2026-11-17.** Registro y consulta de gastos mediante envelope 1.0, frontera autenticada y HTTPS efímero de pruebas; SQLite financiero v10 sin cambios. **354 pruebas aprobadas.** Se conservan los módulos financieros y el adaptador en memoria. La Fase 1 sigue abierta; sin conexión al runtime real de Sir Jarvis, datos reales ni API desplegada. Sin commits ni PR en este incremento.
+**Estado: interoperabilidad local con componentes reales de Jarvis verificada el 2026-11-17.** Registry, Gateway durable y transporte HTTPS ejecutan registro y consulta de gastos sintéticos. **20 pruebas optativas de interoperabilidad aprobadas**; las 354 pruebas anteriores corresponden al incremento previo. SQLite financiero v10 y journal del adaptador v1 sin cambios. Pendiente repetir en un Node admitido por ambos proyectos: esta ejecución usó 24.19.0 y Jarvis exige ≥24.22.1. La Fase 1 sigue abierta; sin arranque del Jarvis operativo, datos reales ni despliegue.
 
 Don Gastón es propietario de las reglas financieras; Sir Jarvis conserva canales, identidad conversacional, orquestación y confirmaciones. Solo el alcance descrito aquí está implementado; las demás reglas de producto siguen siendo requisitos. La referencia histórica se conserva sin cambios.
+
+## Interoperabilidad local optativa — Fase 2A
+
+```powershell
+# Checkout local confiable, exclusivamente de pruebas; nunca una ruta recibida del usuario remoto.
+$env:JARVIS_INTEROP_REPO = 'D:/Documentos/sir-jarvis'
+npm.cmd run test:interop
+```
+
+Carga las clases reales desde ese checkout, sin copiar el Gateway ni arrancar
+Jarvis. Necesita sus dependencias locales ya instaladas y OpenSSL. La suite normal
+`npm test` y el build permanecen independientes del repositorio vecino.
+Usa tres bases nuevas bajo `.cache/jarvis-real-interop/`, credenciales ficticias
+y HTTPS efímero con CA verificada. Cierra todos los componentes y conserva las
+fixtures. No lee configuración, secretos, bases ni logs operativos.
+
+Un resultado recuperado mediante lookup **no desbloquea** una escritura incierta
+del Gateway. No existe atomicidad ni respaldo coordinado entre las tres bases.
+[Procedimiento, evidencia y diferencias](docs/reviews/JARVIS_REAL_GATEWAY_INTEROP.md).
 
 ## Demostración HTTPS local aprobada
 

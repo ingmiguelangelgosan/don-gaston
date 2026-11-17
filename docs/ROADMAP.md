@@ -146,6 +146,17 @@ Sin flujo de caja global, cobranza, scheduler ni integración. La Fase 1 sigue a
 
 ## Fase 2 — Casos financieros MVP
 
+### Fase 2A adelantada por autorización: interoperabilidad local
+
+2026-11-17: **20/20 pruebas optativas** con Registry, Gateway durable, transporte
+HTTPS y journal SQLite reales de Jarvis. Registro/lookup, reintentos, permisos,
+TLS, límites y recuperación sin desbloquear estados inciertos verificados.
+Sin cambios en Jarvis, reglas financieras ni migraciones; sin arranque operativo.
+El Node disponible (24.19.0) está fuera del mínimo declarado por Jarvis (24.22.1):
+repetir en una versión admitida por ambos es el siguiente paso antes de promover
+la integración. [Evidencia y pendientes](reviews/JARVIS_REAL_GATEWAY_INTEROP.md).
+No se declara cerrada la Fase 1 ni autorizado el uso real.
+
 - Orquestación pendiente de revisión mensual de presupuestos y generación de
   facturas (núcleo adelantado a 1I); ampliaciones de gastos fijos, deudas,
   pagos confirmados, ampliaciones salariales (núcleo FIFO adelantado a 1H), ampliaciones
