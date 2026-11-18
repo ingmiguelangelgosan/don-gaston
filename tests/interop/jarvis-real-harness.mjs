@@ -35,6 +35,9 @@ const { SqliteStateStore } = await source(
 );
 const { AgentGatewayError } = await source('src/agents/errors.ts');
 const { executionKey } = await source('src/agents/json.ts');
+const { createDurableTelegramJournal } = await source(
+  'src/channels/telegram/durable-actions.ts',
+);
 export const { HttpsEndpointPolicy } = await source(
   'src/agents/network-policy.ts',
 );
@@ -51,8 +54,36 @@ const context = Object.freeze({
 const agentId = 'don-gaston.interop';
 const capabilityNames = ['finance.expense.record', 'finance.expense.lookup'];
 
-export async function setup(options = {}) {
+// Initial composition finishes before these controls are exposed. A stop queues
+// behind any restart already requested and prevents later requests to restart.
+export function fixtureLifecycle(restart, stop) {
+  let tail = Promise.resolve();
+  const enqueue = (work) => {
+    const result = tail.then(work);
+    tail = result.catch(() => {});
+    return result;
+  };
+  let stopping = false;
+  return {
+    restart() {
+      if (stopping)
+        return Promise.reject(new Error('Synthetic fixture is stopping'));
+      return enqueue(restart);
+    },
+    close() {
+      stopping = true;
+      return enqueue(stop);
+    },
+  };
+}
+
+export async function setup(options = {}, bindConversationJournal) {
   const directory = mkdtempSync(join(root, 'case-'));
+  const maintenance = options.maintenance
+    ? (await source('tests/maintenance-barrier.ts')).initializeFixtureBarrier(
+        join(directory, 'maintenance.sqlite'),
+      )
+    : undefined;
   const paths = {
     finance: join(directory, 'finance.sqlite'),
     adapter: join(directory, 'adapter.sqlite'),
@@ -98,8 +129,12 @@ export async function setup(options = {}) {
     transport,
     service,
     registry,
-    schemas;
+    schemas,
+    runtimeWriter;
   let calls = 0,
+    receivedRequests = 0,
+    sendStartChecks = 0,
+    sendStarts = 0,
     drop = options.dropOnce === true,
     category;
   const schemaChecks = [];
@@ -131,7 +166,34 @@ export async function setup(options = {}) {
     capability: { name: capabilityNames[1], version: '1.0' },
     input: { write_intent_id: writeId },
   });
-  async function closeComponents() {
+  const run = (stage, work) =>
+    runtimeWriter ? runtimeWriter.run(stage, work) : work();
+  const runSync = (stage, work) =>
+    runtimeWriter ? runtimeWriter.runSync(stage, work) : work();
+  const execution = {
+    async execute(actor, request, signal) {
+      return run('gateway', () => service.execute(actor, request, signal));
+    },
+    async getOperation(actor, query, signal) {
+      return run('gateway', () => service.getOperation(actor, query, signal));
+    },
+  };
+  const guardedTransport = {
+    async execute(request, signal) {
+      return run('dispatch', () => transport.execute(request, signal));
+    },
+    async getOperation(query, signal) {
+      return run('dispatch', () => transport.getOperation(query, signal));
+    },
+  };
+  function receive(body, auth) {
+    return runSync('adapter', () => {
+      options.beforeAdapterHandle?.();
+      calls++;
+      return adapter.handle(body, auth);
+    });
+  }
+  async function closeResources() {
     const errors = [];
     for (const component of [
       gateway,
@@ -151,7 +213,12 @@ export async function setup(options = {}) {
     if (errors.length)
       throw new AggregateError(errors, 'Synthetic component cleanup failed');
   }
+  async function closeComponents() {
+    if (runtimeWriter) await runtimeWriter.stop(closeResources);
+    else await closeResources();
+  }
   async function start(create) {
+    runtimeWriter = maintenance?.openWriter('interop-runtime');
     try {
       if (!create && Object.values(paths).some((path) => !existsSync(path)))
         throw new Error('Missing synthetic recovery database');
@@ -165,24 +232,22 @@ export async function setup(options = {}) {
           name: 'Gasolina ficticia',
         });
       adapter = new DemoAdapter({ store, journal, bindings });
-      server = await startDemoHttps(
-        certificates,
-        (body, auth) => {
-          calls++;
-          return adapter.handle(body, auth);
+      const receiveHttps = (body, auth) => {
+        receivedRequests++;
+        return receive(body, auth);
+      };
+      server = await startDemoHttps(certificates, receiveHttps, {
+        afterHandle: (reply) => {
+          if (drop && reply.body.status === 'completed') {
+            drop = false;
+            return 'drop';
+          }
         },
-        {
-          afterHandle: (reply) => {
-            if (drop && reply.body.status === 'completed') {
-              drop = false;
-              return 'drop';
-            }
-          },
-          ...(options.transformReply
-            ? { transformReply: options.transformReply }
-            : {}),
-        },
-      );
+        ...(options.transformReply
+          ? { transformReply: options.transformReply }
+          : {}),
+      });
+      if (options.afterHttpsListen) await options.afterHttpsListen(server.port);
       const hostname = options.wrongHostname
         ? 'wrong-don-gaston.test'
         : 'don-gaston.test';
@@ -277,6 +342,7 @@ export async function setup(options = {}) {
       );
       const network = {
         async resolve(value, signal) {
+          if (options.beforeHttpsResolve) await options.beforeHttpsResolve();
           if (signal.aborted) throw new AgentGatewayError('CANCELLED');
           if (value !== origin) throw new AgentGatewayError('FORBIDDEN');
           return {
@@ -288,6 +354,7 @@ export async function setup(options = {}) {
           };
         },
       };
+      const writer = runtimeWriter;
       transport = new HttpsAgentTransport(
         registry,
         schemas,
@@ -296,12 +363,23 @@ export async function setup(options = {}) {
         {
           ca: options.untrustedCa ? foreignCertificates.ca : certificates.ca,
           timeoutMs: 1500,
+          ...(writer
+            ? {
+                withSendStart(start) {
+                  sendStartChecks++;
+                  writer.withSendStart(() => {
+                    start();
+                    sendStarts++;
+                  });
+                },
+              }
+            : {}),
         },
       );
       gateway = new DurableAgentGateway(
         registry,
         schemas,
-        transport,
+        maintenance ? guardedTransport : transport,
         stateStore,
         fingerprintKey,
         { resultCacheMs: 30000, attemptTimeoutMs: 2000, totalTimeoutMs: 4000 },
@@ -313,9 +391,13 @@ export async function setup(options = {}) {
     }
   }
   await start(true);
+  bindConversationJournal?.((actionKey) =>
+    createDurableTelegramJournal(stateStore, actionKey, actor.instance_id),
+  );
   return {
     directory,
     paths,
+    maintenance,
     category,
     actor,
     record,
@@ -325,17 +407,31 @@ export async function setup(options = {}) {
     get registry() {
       return registry;
     },
-    get execution() {
-      return service;
-    },
-    get durableStore() {
-      return stateStore;
+    execution,
+    actionPhase(id) {
+      return stateStore.getAction(id)?.phase;
     },
     get calls() {
       return calls;
     },
+    get receivedRequests() {
+      return receivedRequests;
+    },
+    get sendStarts() {
+      return sendStarts;
+    },
+    get sendStartChecks() {
+      return sendStartChecks;
+    },
     execute(request, boundActor = actor) {
-      return service.execute(boundActor, request, new AbortController().signal);
+      return execution.execute(
+        boundActor,
+        request,
+        new AbortController().signal,
+      );
+    },
+    receiveDirect(request) {
+      return receive(Buffer.from(JSON.stringify(request)), `Bearer ${token}`);
     },
     expenses() {
       return store.listExpenses(context);
@@ -349,22 +445,27 @@ export async function setup(options = {}) {
       return journal.has(requestKey(request));
     },
     restartGateway() {
-      gateway.close();
-      // Preserve the live transport/store: reconstruct only volatile execution state.
-      gateway = new DurableAgentGateway(
-        registry,
-        schemas,
-        transport,
-        stateStore,
-        fingerprintKey,
-        { resultCacheMs: 30000, attemptTimeoutMs: 2000, totalTimeoutMs: 4000 },
-      );
-      service = new AgentExecutionService(registry, gateway);
+      runSync('gateway-restart', () => {
+        gateway.close();
+        // Preserve the live transport/store: reconstruct only volatile execution state.
+        gateway = new DurableAgentGateway(
+          registry,
+          schemas,
+          maintenance ? guardedTransport : transport,
+          stateStore,
+          fingerprintKey,
+          {
+            resultCacheMs: 30000,
+            attemptTimeoutMs: 2000,
+            totalTimeoutMs: 4000,
+          },
+        );
+        service = new AgentExecutionService(registry, gateway);
+      });
     },
-    async restart() {
+    ...fixtureLifecycle(async () => {
       await closeComponents();
       await start(false);
-    },
-    close: closeComponents,
+    }, closeComponents),
   };
 }
